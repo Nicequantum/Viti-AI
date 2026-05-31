@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, Settings, ArrowLeft, Plus, Copy, RefreshCw, Check } from 'lucide-react';
+import { Camera, Settings, ArrowLeft, Plus, Copy, RefreshCw } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 
 // Types
@@ -115,8 +115,8 @@ Write only the warranty story for this specific line.`;
     throw new Error(`Grok API error: ${response.status} ${err}`);
   }
 
-  const data = await response.json();
-  return data.choices[0]?.message?.content?.trim() || 'No story generated.';
+  const apiResponse = await response.json();
+  return apiResponse.choices?.[0]?.message?.content?.trim() || 'No story generated.';
 }
 
 function App() {
@@ -160,7 +160,7 @@ function App() {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
-    input.capture = 'environment';
+    input.setAttribute('capture', 'environment');
     
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];

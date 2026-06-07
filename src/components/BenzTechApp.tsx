@@ -7,6 +7,7 @@ import { HomeView } from '@/components/HomeView';
 import { LineView } from '@/components/LineView';
 import { LoginView } from '@/components/LoginView';
 import { ROView } from '@/components/ROView';
+import { AuditLogView } from '@/components/AuditLogView';
 import { SettingsView } from '@/components/SettingsView';
 import { useOcrProgress } from '@/hooks/useOcrProgress';
 import { useRepairOrders } from '@/hooks/useRepairOrders';
@@ -54,7 +55,7 @@ export function BenzTechApp() {
 
   return (
     <div className="app-container">
-      {ro.view !== 'home' && ro.view !== 'settings' && (
+      {ro.view !== 'home' && ro.view !== 'settings' && ro.view !== 'audit' && (
         <AppHeader dealershipName={session.dealershipName} technicianName={session.name} onOpenSettings={goToSettings} />
       )}
 
@@ -128,6 +129,14 @@ export function BenzTechApp() {
           session={session}
           onBack={() => ro.setView(ro.currentRO ? 'ro' : 'home')}
           onLogout={logout}
+          onOpenAuditLogs={session.role === 'manager' ? () => ro.setView('audit') : undefined}
+        />
+      )}
+
+      {ro.view === 'audit' && (
+        <AuditLogView
+          session={session}
+          onBack={() => ro.setView('settings')}
         />
       )}
     </div>

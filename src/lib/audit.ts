@@ -3,6 +3,7 @@ import { prisma } from './db';
 export type AuditAction =
   | 'auth.login'
   | 'auth.logout'
+  | 'auth.password_change'
   | 'consent.accept'
   | 'ro.create'
   | 'ro.update'
@@ -12,6 +13,7 @@ export type AuditAction =
   | 'user.create'
   | 'user.deactivate'
   | 'user.reactivate'
+  | 'user.password_reset'
   | 'image.upload';
 
 interface AuditLogInput {

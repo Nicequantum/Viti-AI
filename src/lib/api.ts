@@ -1,4 +1,4 @@
-import type { RepairOrder, StructuredROExtraction, TechnicianSession } from '@/types';
+import type { AuditLogEntry, RepairOrder, StructuredROExtraction, TechnicianSession } from '@/types';
 
 export interface TechnicianUser {
   id: string;
@@ -56,6 +56,12 @@ export const api = {
 
   acceptConsent: () => apiFetch<{ consentAt: string }>('/api/consent', { method: 'POST' }),
 
+  changePassword: (currentPassword: string, newPassword: string) =>
+    apiFetch<{ ok: boolean }>('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+
   listRepairOrders: () => apiFetch<{ repairOrders: RepairOrder[] }>('/api/repair-orders'),
 
   getRepairOrder: (id: string) => apiFetch<{ repairOrder: RepairOrder }>(`/api/repair-orders/${id}`),
@@ -78,13 +84,13 @@ export const api = {
   uploadImage: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    return apiUpload<{ url: string; name: string }>('/api/upload', formData);
+    return apiUpload<{ pathname: string; url: string; name: string }>('/api/upload', formData);
   },
 
-  extractRO: (imageUrls: string[]) =>
+  extractRO: (imagePathnames: string[]) =>
     apiFetch<StructuredROExtraction>('/api/repair-orders/extract', {
       method: 'POST',
-      body: JSON.stringify({ imageUrls }),
+      body: JSON.stringify({ imagePathnames }),
     }),
 
   generateStory: (roId: string, lineId: string) =>
@@ -119,4 +125,40 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+
+  resetUserPassword: (id: string, newPassword: string) =>
+    apiFetch<{ ok: boolean }>(`/api/users/${id}/password`, {
+      method: 'PATCH',
+      body: JSON.stringify({ newPassword }),
+    }),
+
+  listAuditLogs: (params: {
+    technicianId?: string;
+    action?: string;
+    from?: string;
+    to?: string;
+  }) => {
+    const query = new URLSearchParams();
+    if (params.technicianId) query.set('technicianId', params.technicianId);
+    if (params.action) query.set('action', params.action);
+    if (params.from) query.set('from', params.from);
+    if (params.to) query.set('to', params.to);
+    query.set('format', 'json');
+    return apiFetch<{ logs: AuditLogEntry[]; count: number }>(`/api/audit-logs?${query.toString()}`);
+  },
+
+  exportAuditLogsCsv: (params: {
+    technicianId?: string;
+    action?: string;
+    from?: string;
+    to?: string;
+  }) => {
+    const query = new URLSearchParams();
+    if (params.technicianId) query.set('technicianId', params.technicianId);
+    if (params.action) query.set('action', params.action);
+    if (params.from) query.set('from', params.from);
+    if (params.to) query.set('to', params.to);
+    query.set('format', 'csv');
+    return `/api/audit-logs?${query.toString()}`;
+  },
 };

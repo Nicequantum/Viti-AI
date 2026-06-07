@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Building2, LogOut, Shield, User, UserPlus, Users } from 'lucide-react';
+import { ArrowLeft, Building2, KeyRound, LogOut, ScrollText, Shield, User, UserPlus, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, type TechnicianUser } from '@/lib/api';
 import type { TechnicianSession } from '@/types';
@@ -11,14 +11,20 @@ interface SettingsViewProps {
   session: TechnicianSession;
   onBack: () => void;
   onLogout: () => Promise<void>;
+  onOpenAuditLogs?: () => void;
 }
 
-export function SettingsView({ session, onBack, onLogout }: SettingsViewProps) {
+export function SettingsView({ session, onBack, onLogout, onOpenAuditLogs }: SettingsViewProps) {
   const [users, setUsers] = useState<TechnicianUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newUser, setNewUser] = useState({ email: '', name: '', password: '', role: 'technician' as 'technician' | 'manager' });
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [resetTargetId, setResetTargetId] = useState<string | null>(null);
+  const [resetPassword, setResetPassword] = useState('');
 
   const isManager = session.role === 'manager';
 
@@ -48,6 +54,21 @@ export function SettingsView({ session, onBack, onLogout }: SettingsViewProps) {
     }
   };
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangingPassword(true);
+    try {
+      await api.changePassword(currentPassword, newPassword);
+      toast.success('Password updated');
+      setCurrentPassword('');
+      setNewPassword('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to change password');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreating(true);
@@ -71,6 +92,21 @@ export function SettingsView({ session, onBack, onLogout }: SettingsViewProps) {
       await loadUsers();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update account');
+    }
+  };
+
+  const handleResetPassword = async (userId: string) => {
+    if (!resetPassword || resetPassword.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+    try {
+      await api.resetUserPassword(userId, resetPassword);
+      toast.success('Password reset successfully');
+      setResetTargetId(null);
+      setResetPassword('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reset password');
     }
   };
 
@@ -100,22 +136,67 @@ export function SettingsView({ session, onBack, onLogout }: SettingsViewProps) {
       </div>
 
       <div className="ios-card p-5 mb-4">
+        <div className="flex items-center gap-2 mb-3">
+          <KeyRound size={16} className="text-[#0a84ff]" />
+          <div className="font-semibold text-sm">Change Password</div>
+        </div>
+        <form onSubmit={handleChangePassword} className="space-y-2">
+          <input
+            type="password"
+            placeholder="Current password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            className="w-full bg-[#1c1c1e] rounded px-3 py-2 text-sm"
+            required
+          />
+          <input
+            type="password"
+            placeholder="New password (min 8 characters)"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            className="w-full bg-[#1c1c1e] rounded px-3 py-2 text-sm"
+            minLength={8}
+            required
+          />
+          <button type="submit" disabled={changingPassword} className="primary-btn w-full h-10 text-sm disabled:opacity-60">
+            {changingPassword ? 'UPDATING...' : 'UPDATE PASSWORD'}
+          </button>
+        </form>
+      </div>
+
+      <div className="ios-card p-5 mb-4">
         <div className="flex items-center gap-2 mb-2">
           <Shield size={16} className="text-[#30d158]" />
           <div className="font-semibold text-sm">Security & Compliance</div>
         </div>
         <ul className="text-xs text-[#8e8e93] space-y-2 leading-relaxed">
           <li>✓ Grok API key secured server-side — never in browser</li>
-          <li>✓ Customer PII encrypted at rest (AES-256-GCM)</li>
+          <li>✓ Customer name, VIN, and complaints encrypted at rest (AES-256-GCM)</li>
+          <li>✓ Diagnostic images stored privately in Vercel Blob (session-gated access)</li>
           <li>✓ Session-based technician authentication (12h)</li>
           <li>✓ Audit-safe warranty prompt — no fabricated data</li>
-          <li>✓ Diagnostic images stored in Vercel Blob (URLs only in database)</li>
           <li>
             Consent accepted:{' '}
             {session.consentAt ? new Date(session.consentAt).toLocaleDateString() : 'Pending'} (v{CONSENT_VERSION})
           </li>
         </ul>
       </div>
+
+      {isManager && onOpenAuditLogs && (
+        <button
+          onClick={onOpenAuditLogs}
+          className="ios-card p-5 mb-4 w-full flex items-center justify-between text-left"
+        >
+          <div className="flex items-center gap-2">
+            <ScrollText size={16} className="text-[#0a84ff]" />
+            <div>
+              <div className="font-semibold text-sm">Audit Log</div>
+              <div className="text-[10px] text-[#8e8e93]">View and export dealership activity</div>
+            </div>
+          </div>
+          <span className="text-[#0a84ff] text-xs">OPEN</span>
+        </button>
+      )}
 
       {isManager && (
         <div className="ios-card p-5 mb-4">
@@ -180,21 +261,52 @@ export function SettingsView({ session, onBack, onLogout }: SettingsViewProps) {
           ) : (
             <div className="space-y-2">
               {users.map((user) => (
-                <div key={user.id} className="flex items-center justify-between bg-[#1c1c1e] rounded px-3 py-2">
-                  <div>
-                    <div className="text-sm font-medium">{user.name}</div>
-                    <div className="text-[10px] text-[#8e8e93]">
-                      {user.email} · {user.role}
-                      {!user.isActive && <span className="text-[#ff3b30] ml-1">(deactivated)</span>}
+                <div key={user.id} className="bg-[#1c1c1e] rounded px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">{user.name}</div>
+                      <div className="text-[10px] text-[#8e8e93]">
+                        {user.email} · {user.role}
+                        {!user.isActive && <span className="text-[#ff3b30] ml-1">(deactivated)</span>}
+                      </div>
                     </div>
+                    {user.id !== session.technicianId && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setResetTargetId(resetTargetId === user.id ? null : user.id);
+                            setResetPassword('');
+                          }}
+                          className="text-[10px] px-2 py-1 rounded text-[#0a84ff]"
+                        >
+                          RESET PW
+                        </button>
+                        <button
+                          onClick={() => toggleUserActive(user)}
+                          className={`text-[10px] px-2 py-1 rounded ${user.isActive ? 'text-[#ff9f0a]' : 'text-[#30d158]'}`}
+                        >
+                          {user.isActive ? 'DEACTIVATE' : 'REACTIVATE'}
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {user.id !== session.technicianId && (
-                    <button
-                      onClick={() => toggleUserActive(user)}
-                      className={`text-[10px] px-2 py-1 rounded ${user.isActive ? 'text-[#ff9f0a]' : 'text-[#30d158]'}`}
-                    >
-                      {user.isActive ? 'DEACTIVATE' : 'REACTIVATE'}
-                    </button>
+                  {resetTargetId === user.id && (
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        type="password"
+                        placeholder="New password"
+                        value={resetPassword}
+                        onChange={(e) => setResetPassword(e.target.value)}
+                        className="flex-1 bg-[#2c2c2e] rounded px-2 py-1 text-xs"
+                        minLength={8}
+                      />
+                      <button
+                        onClick={() => handleResetPassword(user.id)}
+                        className="text-[10px] text-[#30d158] px-2"
+                      >
+                        SAVE
+                      </button>
+                    </div>
                   )}
                 </div>
               ))}
@@ -207,7 +319,7 @@ export function SettingsView({ session, onBack, onLogout }: SettingsViewProps) {
         <div className="font-semibold mb-1 text-sm">Multi-Technician Access</div>
         <p className="text-xs text-[#8e8e93] leading-relaxed">
           Each technician signs in with their own account. Repair orders are owned by the creating technician. Service
-          managers can view all ROs for the dealership and manage technician accounts above.
+          managers can view all ROs, manage accounts, reset passwords, and review audit logs.
         </p>
       </div>
 

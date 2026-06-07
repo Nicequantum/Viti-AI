@@ -1,99 +1,153 @@
-import { NextResponse } from 'next/server';
+import { writeAuditLog } from '@/lib/audit';
 import { withAuth } from '@/lib/apiRoute';
 import { prisma } from '@/lib/db';
-import { dbToRepairOrder, repairLineToDbFields, repairOrderToDbFields, type RepairOrderInput } from '@/lib/roMapper';
+import {
+  dbToRepairOrder,
+  repairLineToDbFields,
+  repairOrderToDbFields,
+  type RepairOrderInput,
+} from '@/lib/roMapper';
+import { apiError, VALIDATION_ERROR } from '@/lib/errors';
+import { getRequestIp } from '@/lib/rate-limit';
+import { createRepairOrderSchema, parseBody } from '@/lib/validation';
 import { emptyExtractedData } from '@/utils/diagnosticParser';
 import { createRepairOrderFromScan } from '@/utils/repairOrderFactory';
 
-export async function GET() {
-  return withAuth(async (session) => {
-    const where =
-      session.role === 'manager'
-        ? { dealershipId: session.dealershipId }
-        : { technicianId: session.technicianId };
+export async function GET(request: Request) {
+  return withAuth(
+    request,
+    async (session) => {
+      const where =
+        session.role === 'manager'
+          ? { dealershipId: session.dealershipId }
+          : { technicianId: session.technicianId };
 
-    const orders = await prisma.repairOrder.findMany({
-      where,
-      include: {
-        repairLines: true,
-        technician: { select: { name: true } },
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
+      const orders = await prisma.repairOrder.findMany({
+        where,
+        include: {
+          repairLines: true,
+          technician: { select: { name: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
 
-    const repairOrders = orders.map((ro) => {
-      const mapped = dbToRepairOrder(ro);
-      mapped.technicianName = ro.technician.name;
-      return mapped;
-    });
+      const repairOrders = orders.map((ro) => {
+        const mapped = dbToRepairOrder(ro);
+        mapped.technicianName = ro.technician.name;
+        return mapped;
+      });
 
-    return { repairOrders };
-  });
+      return { repairOrders };
+    },
+    { rateLimitKey: 'ros.list' }
+  );
 }
 
 export async function POST(request: Request) {
-  return withAuth(async (session) => {
-    const body = await request.json();
-
-    let input: RepairOrderInput;
-    if (body.fromExtraction) {
-      const ro = createRepairOrderFromScan({
-        roNumber: body.roNumber || `R-${Date.now().toString().slice(-6)}`,
-        vehicle: body.vehicle,
-        customerName: body.customerName || '',
-        complaints: body.complaints || [],
-      });
-      input = {
-        roNumber: ro.roNumber,
-        vehicle: ro.vehicle,
-        customer: ro.customer,
-        complaints: ro.complaints,
-        xentryImages: ro.xentryImages,
-        xentryOcrTexts: ro.xentryOcrTexts,
-        repairLines: ro.repairLines,
-      };
-    } else {
-      input = {
-        roNumber: body.roNumber || `R-${Date.now().toString().slice(-6)}`,
-        vehicle: body.vehicle || { vin: '', year: '', make: '', model: '', engine: '', mileageIn: '', mileageOut: '' },
-        customer: body.customer || { name: '' },
-        complaints: body.complaints || [],
-        xentryImages: body.xentryImages || [],
-        xentryOcrTexts: body.xentryOcrTexts || [],
-        repairLines: (body.repairLines || []).map((l: RepairOrderInput['repairLines'][0], i: number) => ({
-          ...l,
-          lineNumber: l.lineNumber || i + 1,
-          extractedData: l.extractedData || emptyExtractedData(),
-          xentryImages: l.xentryImages || [],
-        })),
-      };
-      if (input.repairLines.length === 0) {
-        input.repairLines = [
-          {
-            id: 'temp',
-            lineNumber: 1,
-            description: 'Enter repair description',
-            customerConcern: '',
-            technicianNotes: '',
-            xentryImages: [],
-            extractedData: emptyExtractedData(),
-          },
-        ];
+  return withAuth(
+    request,
+    async (session) => {
+      const body = await request.json();
+      const parsed = parseBody(createRepairOrderSchema, body);
+      if ('error' in parsed) {
+        return apiError(VALIDATION_ERROR, 400);
       }
-    }
 
-    const created = await prisma.repairOrder.create({
-      data: {
-        ...repairOrderToDbFields(input),
-        technicianId: session.technicianId,
-        dealershipId: session.dealershipId,
-        repairLines: {
-          create: input.repairLines.map((line) => repairLineToDbFields(line)),
+      const data = parsed.data;
+      let input: RepairOrderInput;
+
+      if (data.fromExtraction) {
+        const ro = createRepairOrderFromScan({
+          roNumber: data.roNumber || `R-${Date.now().toString().slice(-6)}`,
+          vehicle: {
+            vin: data.vehicle?.vin || '',
+            year: data.vehicle?.year || '',
+            make: data.vehicle?.make || '',
+            model: data.vehicle?.model || '',
+            engine: data.vehicle?.engine || '',
+            mileageIn: data.vehicle?.mileageIn || '',
+            mileageOut: data.vehicle?.mileageOut || '',
+          },
+          customerName: data.customerName || data.customer?.name || '',
+          complaints: data.complaints || [],
+        });
+        input = {
+          roNumber: ro.roNumber,
+          vehicle: ro.vehicle,
+          customer: ro.customer,
+          complaints: ro.complaints,
+          xentryImages: ro.xentryImages,
+          xentryOcrTexts: ro.xentryOcrTexts,
+          repairLines: ro.repairLines,
+        };
+      } else {
+        input = {
+          roNumber: data.roNumber || `R-${Date.now().toString().slice(-6)}`,
+          vehicle: {
+            vin: data.vehicle?.vin || '',
+            year: data.vehicle?.year || '',
+            make: data.vehicle?.make || '',
+            model: data.vehicle?.model || '',
+            engine: data.vehicle?.engine || '',
+            mileageIn: data.vehicle?.mileageIn || '',
+            mileageOut: data.vehicle?.mileageOut || '',
+          },
+          customer: { name: data.customer?.name || '' },
+          complaints: data.complaints || [],
+          xentryImages: data.xentryImages || [],
+          xentryOcrTexts: data.xentryOcrTexts || [],
+          repairLines: (data.repairLines || []).map((l, i) => ({
+            id: l.id || `temp-${i}`,
+            lineNumber: l.lineNumber || i + 1,
+            description: l.description || 'Enter repair description',
+            customerConcern: l.customerConcern || '',
+            technicianNotes: l.technicianNotes || '',
+            xentryImages: l.xentryImages || [],
+            xentryOcrTexts: l.xentryOcrTexts || [],
+            extractedData: { ...emptyExtractedData(), ...l.extractedData },
+            warrantyStory: l.warrantyStory,
+          })),
+        };
+
+        if (input.repairLines.length === 0) {
+          input.repairLines = [
+            {
+              id: 'temp',
+              lineNumber: 1,
+              description: 'Enter repair description',
+              customerConcern: '',
+              technicianNotes: '',
+              xentryImages: [],
+              extractedData: emptyExtractedData(),
+            },
+          ];
+        }
+      }
+
+      const created = await prisma.repairOrder.create({
+        data: {
+          ...repairOrderToDbFields(input),
+          technicianId: session.technicianId,
+          dealershipId: session.dealershipId,
+          repairLines: {
+            create: input.repairLines.map((line) => repairLineToDbFields(line)),
+          },
         },
-      },
-      include: { repairLines: true },
-    });
+        include: { repairLines: true },
+      });
 
-    return { repairOrder: dbToRepairOrder(created) };
-  });
+      await writeAuditLog({
+        action: 'ro.create',
+        dealershipId: session.dealershipId,
+        technicianId: session.technicianId,
+        entityType: 'repairOrder',
+        entityId: created.id,
+        metadata: { roNumber: created.roNumber },
+        ipAddress: getRequestIp(request),
+      });
+
+      return { repairOrder: dbToRepairOrder(created) };
+    },
+    { rateLimitKey: 'ros.create' }
+  );
 }

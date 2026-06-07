@@ -1,23 +1,39 @@
 import { NextResponse } from 'next/server';
+import { writeAuditLog } from '@/lib/audit';
 import { createSessionToken, loginTechnician, setSessionCookie } from '@/lib/auth';
+import { apiError, handleRouteError, VALIDATION_ERROR } from '@/lib/errors';
+import { checkRateLimit, getRequestIp, RATE_LIMITS } from '@/lib/rate-limit';
+import { loginSchema, parseBody } from '@/lib/validation';
 
 export async function POST(request: Request) {
+  const rateLimited = checkRateLimit(request, 'auth.login', RATE_LIMITS.auth);
+  if (rateLimited) return rateLimited;
+
   try {
-    const { email, password } = await request.json();
-    if (!email || !password) {
-      return NextResponse.json({ error: 'Email and password required' }, { status: 400 });
+    const body = await request.json();
+    const parsed = parseBody(loginSchema, body);
+    if ('error' in parsed) {
+      return apiError(VALIDATION_ERROR, 400);
     }
 
+    const { email, password } = parsed.data;
     const session = await loginTechnician(email, password);
     if (!session) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+      return apiError('Invalid email or password.', 401);
     }
 
     const token = await createSessionToken(session);
     await setSessionCookie(token);
+
+    await writeAuditLog({
+      action: 'auth.login',
+      dealershipId: session.dealershipId,
+      technicianId: session.technicianId,
+      ipAddress: getRequestIp(request),
+    });
+
     return NextResponse.json({ session });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'Login failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch (error) {
+    return handleRouteError(error, 'auth.login');
   }
 }

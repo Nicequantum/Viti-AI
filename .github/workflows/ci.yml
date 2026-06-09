@@ -30,7 +30,7 @@ jobs:
       SESSION_SECRET: ci-session-secret-minimum-32-characters-long
       ENCRYPTION_KEY: e83834bdbca1cc4d680bde14cb4ad9a29483e426e0a29e7d23c9350551e1987b
       ADMIN_SEED_PASSWORD: CI-Admin-Seed-Password-For-Tests-Only!
-      DEMO_MODE: 'true'
+      DEMO_MODE: 'false'
       GROK_API_KEY: ''
 
     steps:

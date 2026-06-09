@@ -8,12 +8,14 @@ datasource db {
 }
 
 model Dealership {
-  id           String        @id @default(cuid())
-  name         String
-  createdAt    DateTime      @default(now())
-  technicians  Technician[]
-  repairOrders RepairOrder[]
-  auditLogs    AuditLog[]
+  id              String                        @id @default(cuid())
+  name            String
+  createdAt       DateTime                      @default(now())
+  technicians     Technician[]
+  repairOrders    RepairOrder[]
+  auditLogs       AuditLog[]
+  serviceAdvisors ServiceAdvisor[]
+  advisorObservations AdvisorComplaintObservation[]
 }
 
 model Technician {
@@ -38,30 +40,107 @@ model Technician {
 }
 
 model RepairOrder {
-  id                    String       @id @default(cuid())
-  roNumber              String
-  technicianId          String
-  technician            Technician   @relation(fields: [technicianId], references: [id])
-  dealershipId          String
-  dealership            Dealership   @relation(fields: [dealershipId], references: [id])
-  vinEncrypted          String       @default("")
-  year                  String       @default("")
-  make                  String       @default("")
-  model                 String       @default("")
-  engine                String       @default("")
-  mileageIn             String       @default("")
-  mileageOut            String       @default("")
-  customerNameEncrypted String       @default("")
-  complaintsEncrypted   String       @default("[]")
-  xentryOcrTexts        String       @default("[]")
-  xentryImageUrls       String       @default("[]")
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
-  repairLines           RepairLine[]
+  id                         String       @id @default(cuid())
+  roNumber                   String
+  technicianId               String
+  technician                 Technician   @relation(fields: [technicianId], references: [id])
+  dealershipId               String
+  dealership                 Dealership   @relation(fields: [dealershipId], references: [id])
+  serviceAdvisorId           String?
+  serviceAdvisor             ServiceAdvisor? @relation(fields: [serviceAdvisorId], references: [id], onDelete: SetNull)
+  serviceAdvisorNameEncrypted String      @default("")
+  advisorMatchConfidence     Float?
+  advisorIdentifiedAt        DateTime?
+  vinEncrypted               String       @default("")
+  year                       String       @default("")
+  make                       String       @default("")
+  model                      String       @default("")
+  engine                     String       @default("")
+  mileageIn                  String       @default("")
+  mileageOut                 String       @default("")
+  customerNameEncrypted      String       @default("")
+  complaintsEncrypted        String       @default("[]")
+  xentryOcrTexts             String       @default("[]")
+  xentryImageUrls            String       @default("[]")
+  createdAt                  DateTime     @default(now())
+  updatedAt                  DateTime     @updatedAt
+  repairLines                RepairLine[]
+  advisorObservations        AdvisorComplaintObservation[]
 
   @@index([technicianId])
   @@index([dealershipId])
   @@index([roNumber])
+  @@index([serviceAdvisorId])
+}
+
+// ─── Advisor Intelligence (Phase 1) ─────────────────────────────────────────
+
+model ServiceAdvisor {
+  id              String   @id @default(cuid())
+  dealershipId    String
+  dealership      Dealership @relation(fields: [dealershipId], references: [id], onDelete: Cascade)
+  displayName     String
+  nameFingerprint String
+  advisorCode     String?
+  status          String   @default("active")
+  mergedIntoId    String?
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  roCount         Int      @default(0)
+  aliases         ServiceAdvisorAlias[]
+  observations    AdvisorComplaintObservation[]
+  profile         AdvisorWritingProfile?
+  repairOrders    RepairOrder[]
+
+  @@unique([dealershipId, nameFingerprint])
+  @@index([dealershipId, lastSeenAt])
+}
+
+model ServiceAdvisorAlias {
+  id               String         @id @default(cuid())
+  serviceAdvisorId String
+  serviceAdvisor   ServiceAdvisor @relation(fields: [serviceAdvisorId], references: [id], onDelete: Cascade)
+  aliasText        String
+  aliasFingerprint String
+  hitCount         Int            @default(1)
+  lastSeenAt       DateTime       @default(now())
+
+  @@unique([serviceAdvisorId, aliasFingerprint])
+  @@index([aliasFingerprint])
+}
+
+model AdvisorComplaintObservation {
+  id                     String         @id @default(cuid())
+  dealershipId           String
+  dealership             Dealership     @relation(fields: [dealershipId], references: [id], onDelete: Cascade)
+  serviceAdvisorId       String
+  serviceAdvisor         ServiceAdvisor @relation(fields: [serviceAdvisorId], references: [id], onDelete: Cascade)
+  repairOrderId          String
+  repairOrder            RepairOrder    @relation(fields: [repairOrderId], references: [id], onDelete: Cascade)
+  lineLabel              String?
+  complaintTextEncrypted String
+  extractionSource       String
+  extractionConfidence   Float?
+  wasCorrected           Boolean        @default(false)
+  vehicleMake            String?
+  vehicleModel           String?
+  vehicleFamily          String?
+  observedAt             DateTime       @default(now())
+
+  @@index([serviceAdvisorId, observedAt])
+  @@index([repairOrderId])
+  @@index([dealershipId, observedAt])
+}
+
+model AdvisorWritingProfile {
+  id               String         @id @default(cuid())
+  serviceAdvisorId String         @unique
+  serviceAdvisor   ServiceAdvisor @relation(fields: [serviceAdvisorId], references: [id], onDelete: Cascade)
+  profileVersion   Int            @default(1)
+  profileData      String         @default("{}")
+  observationCount Int            @default(0)
+  lastComputedAt   DateTime?
+  updatedAt        DateTime       @updatedAt
 }
 
 model RepairLine {

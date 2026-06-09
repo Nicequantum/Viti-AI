@@ -3,6 +3,7 @@ export const RO_EXTRACTION_PROMPT = `Use OCR to carefully analyze ALL provided r
 VEHICLE FIELDS (top header):
 - RO Number: top center (near "RO #", "Repair Order", "Work Order")
 - Customer Name: customer section
+- Service Advisor Name: the service advisor / writer on the RO (often labeled "Service Advisor", "Svc Advisor", "SA", or "Writer" — NOT the technician)
 - Year / Make / Model: vehicle information row
 - VIN: exactly 17 characters
 - Mileage IN: from MILEAGE IN/OUT or odometer (numbers only)
@@ -28,6 +29,7 @@ Output ONLY this exact format:
 
 RO Number: [value]
 Customer Name: [value]
+Service Advisor Name: [value or blank if not visible]
 Year: [value]
 Make: [value]
 Model: [value]

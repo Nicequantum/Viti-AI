@@ -75,7 +75,16 @@ export function imageAttachmentsToJson(images?: ImageAttachment[]): string {
   );
 }
 
-export function dbToRepairOrder(ro: DbRO & { repairLines: DbLine[] }): RepairOrder {
+type DbROWithAdvisor = DbRO & {
+  repairLines: DbLine[];
+  serviceAdvisor?: { id: string; displayName: string } | null;
+};
+
+export function dbToRepairOrder(ro: DbROWithAdvisor): RepairOrder {
+  const advisorName = ro.serviceAdvisorNameEncrypted
+    ? decryptPII(ro.serviceAdvisorNameEncrypted)
+    : undefined;
+
   return {
     id: ro.id,
     roNumber: ro.roNumber,
@@ -90,6 +99,14 @@ export function dbToRepairOrder(ro: DbRO & { repairLines: DbLine[] }): RepairOrd
     },
     customer: { name: decryptPII(ro.customerNameEncrypted) },
     complaints: decryptStringArray(ro.complaintsEncrypted),
+    serviceAdvisor: ro.serviceAdvisor
+      ? {
+          id: ro.serviceAdvisor.id,
+          displayName: ro.serviceAdvisor.displayName,
+          matchConfidence: ro.advisorMatchConfidence ?? undefined,
+        }
+      : undefined,
+    serviceAdvisorName: advisorName || ro.serviceAdvisor?.displayName,
     xentryImages: parseImageAttachments(ro.xentryImageUrls),
     xentryOcrTexts: parseJson<string[]>(ro.xentryOcrTexts, []),
     repairLines: ro.repairLines.sort((a, b) => a.lineNumber - b.lineNumber).map(dbToRepairLine),

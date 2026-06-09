@@ -70,12 +70,16 @@ const repairLineSchema = z.object({
   warrantyStory: safeTextOptional(5000),
 });
 
+const advisorExtractionSourceSchema = z.enum(['grok', 'ocr_fallback', 'manual']);
+
 export const createRepairOrderSchema = z.object({
   fromExtraction: z.boolean().optional(),
   roNumber: safeIdOptional(32),
   vehicle: vehicleSchema.optional(),
   customer: z.object({ name: safeTextOptional(200) }).optional(),
   customerName: safeTextOptional(200),
+  serviceAdvisorName: safeTextOptional(48),
+  advisorExtractionSource: advisorExtractionSourceSchema.optional(),
   complaints: z.array(safeText(2000)).max(20).transform(sanitizeTextArray).optional(),
   xentryImages: z.array(imageAttachmentSchema).max(20).optional(),
   xentryOcrTexts: z.array(safeText(50000)).max(20).optional(),
@@ -86,10 +90,17 @@ export const updateRepairOrderSchema = z.object({
   roNumber: safeIdOptional(32),
   vehicle: vehicleSchema.optional(),
   customer: z.object({ name: safeTextOptional(200) }).optional(),
+  serviceAdvisorName: safeTextOptional(48),
+  advisorExtractionSource: advisorExtractionSourceSchema.optional(),
+  complaintsWereCorrected: z.boolean().optional(),
   complaints: z.array(safeText(2000)).max(20).transform(sanitizeTextArray).optional(),
   xentryImages: z.array(imageAttachmentSchema).max(20).optional(),
   xentryOcrTexts: z.array(safeText(50000)).max(20).optional(),
   repairLines: z.array(repairLineSchema).max(50).optional(),
+});
+
+export const resolveAdvisorSchema = z.object({
+  serviceAdvisorName: safeText(48),
 });
 
 export const createUserSchema = z.object({

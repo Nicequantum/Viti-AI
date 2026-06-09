@@ -1,5 +1,9 @@
 import { writeAuditLog } from '@/lib/audit';
 import { withAuth } from '@/lib/apiRoute';
+import {
+  captureAdvisorIntelligence,
+  type AdvisorExtractionSource,
+} from '@/lib/advisorIntelligence';
 import { prisma } from '@/lib/db';
 import { dbToRepairOrder, normalizeImageAttachments, repairLineToDbFields, repairOrderToDbFields } from '@/lib/roMapper';
 import { apiError, NOT_FOUND_ERROR, VALIDATION_ERROR } from '@/lib/errors';
@@ -25,7 +29,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
       const full = await prisma.repairOrder.findUnique({
         where: { id },
-        include: { repairLines: true },
+        include: {
+          repairLines: true,
+          serviceAdvisor: { select: { id: true, displayName: true } },
+        },
       });
 
       return { repairOrder: dbToRepairOrder(full!) };
@@ -79,50 +86,97 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         }
       }
 
-      await prisma.repairOrder.update({
-        where: { id },
-        data: repairOrderToDbFields(input as Parameters<typeof repairOrderToDbFields>[0]),
+      const extractionSource: AdvisorExtractionSource = data.advisorExtractionSource || 'manual';
+      const advisorNameToCapture = data.serviceAdvisorName || existingMapped.serviceAdvisorName;
+
+      let advisorCapture:
+        | Awaited<ReturnType<typeof captureAdvisorIntelligence>>
+        | null = null;
+
+      await prisma.$transaction(async (tx) => {
+        await tx.repairOrder.update({
+          where: { id },
+          data: repairOrderToDbFields(input as Parameters<typeof repairOrderToDbFields>[0]),
+        });
+
+        if (data.repairLines && Array.isArray(data.repairLines)) {
+          for (const line of data.repairLines) {
+            if (line.id) {
+              const lineFields = repairLineToDbFields({
+                id: line.id,
+                lineNumber: line.lineNumber || 1,
+                description: line.description || 'Enter repair description',
+                customerConcern: line.customerConcern || '',
+                technicianNotes: line.technicianNotes || '',
+                xentryImages: normalizeImageAttachments(line.xentryImages),
+                xentryOcrTexts: line.xentryOcrTexts || [],
+                extractedData: { ...emptyExtractedData(), ...line.extractedData },
+                warrantyStory: line.warrantyStory,
+              });
+
+              await tx.repairLine.upsert({
+                where: { id: line.id },
+                update: lineFields,
+                create: {
+                  id: line.id,
+                  repairOrderId: id,
+                  ...lineFields,
+                },
+              });
+            }
+          }
+
+          const incomingIds = new Set(data.repairLines.map((l) => l.id).filter(Boolean));
+          const dbLines = await tx.repairLine.findMany({ where: { repairOrderId: id } });
+          for (const dbLine of dbLines) {
+            if (!incomingIds.has(dbLine.id)) {
+              await tx.repairLine.delete({ where: { id: dbLine.id } });
+            }
+          }
+        }
+
+        if (advisorNameToCapture) {
+          advisorCapture = await captureAdvisorIntelligence(
+            {
+              dealershipId: session.dealershipId,
+              repairOrderId: id,
+              serviceAdvisorName: advisorNameToCapture,
+              complaints: input.complaints,
+              vehicle: {
+                make: input.vehicle.make,
+                model: input.vehicle.model,
+              },
+              extractionSource,
+              wasCorrected: data.complaintsWereCorrected ?? false,
+            },
+            tx
+          );
+        }
       });
 
-      if (data.repairLines && Array.isArray(data.repairLines)) {
-        for (const line of data.repairLines) {
-          if (line.id) {
-            const lineFields = repairLineToDbFields({
-              id: line.id,
-              lineNumber: line.lineNumber || 1,
-              description: line.description || 'Enter repair description',
-              customerConcern: line.customerConcern || '',
-              technicianNotes: line.technicianNotes || '',
-              xentryImages: normalizeImageAttachments(line.xentryImages),
-              xentryOcrTexts: line.xentryOcrTexts || [],
-              extractedData: { ...emptyExtractedData(), ...line.extractedData },
-              warrantyStory: line.warrantyStory,
-            });
-
-            await prisma.repairLine.upsert({
-              where: { id: line.id },
-              update: lineFields,
-              create: {
-                id: line.id,
-                repairOrderId: id,
-                ...lineFields,
-              },
-            });
-          }
-        }
-
-        const incomingIds = new Set(data.repairLines.map((l) => l.id).filter(Boolean));
-        const dbLines = await prisma.repairLine.findMany({ where: { repairOrderId: id } });
-        for (const dbLine of dbLines) {
-          if (!incomingIds.has(dbLine.id)) {
-            await prisma.repairLine.delete({ where: { id: dbLine.id } });
-          }
-        }
+      if (advisorCapture?.serviceAdvisor) {
+        await writeAuditLog({
+          action: 'advisor.capture',
+          dealershipId: session.dealershipId,
+          technicianId: session.technicianId,
+          entityType: 'serviceAdvisor',
+          entityId: advisorCapture.serviceAdvisor.id,
+          metadata: {
+            repairOrderId: id,
+            roNumber: input.roNumber,
+            observationCount: input.complaints.length,
+            wasCorrected: data.complaintsWereCorrected ?? false,
+          },
+          ipAddress: getRequestIp(request),
+        });
       }
 
       const updated = await prisma.repairOrder.findUnique({
         where: { id },
-        include: { repairLines: true },
+        include: {
+          repairLines: true,
+          serviceAdvisor: { select: { id: true, displayName: true } },
+        },
       });
 
       await writeAuditLog({

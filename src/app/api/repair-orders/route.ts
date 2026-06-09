@@ -1,5 +1,9 @@
 import { writeAuditLog } from '@/lib/audit';
 import { withAuth } from '@/lib/apiRoute';
+import {
+  captureAdvisorIntelligence,
+  type AdvisorExtractionSource,
+} from '@/lib/advisorIntelligence';
 import { prisma } from '@/lib/db';
 import {
   dbToRepairOrder,
@@ -28,6 +32,7 @@ export async function GET(request: Request) {
         include: {
           repairLines: true,
           technician: { select: { name: true } },
+          serviceAdvisor: { select: { id: true, displayName: true } },
         },
         orderBy: { updatedAt: 'desc' },
       });
@@ -71,6 +76,7 @@ export async function POST(request: Request) {
           },
           customerName: data.customerName || data.customer?.name || '',
           complaints: data.complaints || [],
+          serviceAdvisorName: data.serviceAdvisorName,
         });
         input = {
           roNumber: ro.roNumber,
@@ -125,17 +131,65 @@ export async function POST(request: Request) {
         }
       }
 
-      const created = await prisma.repairOrder.create({
-        data: {
-          ...repairOrderToDbFields(input),
-          technicianId: session.technicianId,
-          dealershipId: session.dealershipId,
-          repairLines: {
-            create: input.repairLines.map((line) => repairLineToDbFields(line)),
+      const extractionSource: AdvisorExtractionSource =
+        data.advisorExtractionSource || (data.fromExtraction ? 'grok' : 'manual');
+
+      let advisorCapture:
+        | Awaited<ReturnType<typeof captureAdvisorIntelligence>>
+        | null = null;
+
+      const created = await prisma.$transaction(async (tx) => {
+        const ro = await tx.repairOrder.create({
+          data: {
+            ...repairOrderToDbFields(input),
+            technicianId: session.technicianId,
+            dealershipId: session.dealershipId,
+            repairLines: {
+              create: input.repairLines.map((line) => repairLineToDbFields(line)),
+            },
           },
-        },
-        include: { repairLines: true },
+          include: { repairLines: true, serviceAdvisor: { select: { id: true, displayName: true } } },
+        });
+
+        if (data.serviceAdvisorName) {
+          advisorCapture = await captureAdvisorIntelligence(
+            {
+              dealershipId: session.dealershipId,
+              repairOrderId: ro.id,
+              serviceAdvisorName: data.serviceAdvisorName,
+              complaints: input.complaints,
+              vehicle: {
+                make: input.vehicle.make,
+                model: input.vehicle.model,
+              },
+              extractionSource,
+            },
+            tx
+          );
+        }
+
+        return tx.repairOrder.findUniqueOrThrow({
+          where: { id: ro.id },
+          include: { repairLines: true, serviceAdvisor: { select: { id: true, displayName: true } } },
+        });
       });
+
+      if (advisorCapture?.serviceAdvisor) {
+        await writeAuditLog({
+          action: 'advisor.capture',
+          dealershipId: session.dealershipId,
+          technicianId: session.technicianId,
+          entityType: 'serviceAdvisor',
+          entityId: advisorCapture.serviceAdvisor.id,
+          metadata: {
+            repairOrderId: created.id,
+            roNumber: created.roNumber,
+            observationCount: input.complaints.length,
+            isNewAdvisor: advisorCapture.serviceAdvisor.isNew,
+          },
+          ipAddress: getRequestIp(request),
+        });
+      }
 
       await writeAuditLog({
         action: 'ro.create',

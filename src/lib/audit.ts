@@ -17,7 +17,9 @@ export type AuditAction =
   | 'user.deactivate'
   | 'user.reactivate'
   | 'user.password_reset'
-  | 'image.upload';
+  | 'image.upload'
+  | 'advisor.resolve'
+  | 'advisor.capture';
 
 interface AuditLogInput {
   action: AuditAction;

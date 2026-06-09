@@ -19,6 +19,7 @@ export function createRepairOrderFromScan(params: {
   vehicle: VehicleInfo;
   customerName: string;
   complaints: string[];
+  serviceAdvisorName?: string;
 }): RepairOrder {
   const firstComplaint = params.complaints[0];
   return {
@@ -27,6 +28,7 @@ export function createRepairOrderFromScan(params: {
     vehicle: { ...params.vehicle, engine: params.vehicle.engine || '' },
     customer: { name: params.customerName },
     complaints: params.complaints,
+    serviceAdvisorName: params.serviceAdvisorName,
     xentryImages: [],
     xentryOcrTexts: [],
     createdAt: new Date().toISOString(),

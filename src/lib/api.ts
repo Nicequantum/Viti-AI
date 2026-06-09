@@ -82,7 +82,13 @@ export const api = {
 
   getRepairOrder: (id: string) => apiFetch<{ repairOrder: RepairOrder }>(`/api/repair-orders/${id}`),
 
-  createRepairOrder: (data: Partial<RepairOrder> & { fromExtraction?: boolean; customerName?: string }) =>
+  createRepairOrder: (
+    data: Partial<RepairOrder> & {
+      fromExtraction?: boolean;
+      customerName?: string;
+      advisorExtractionSource?: 'grok' | 'ocr_fallback' | 'manual';
+    }
+  ) =>
     apiFetch<{ repairOrder: RepairOrder }>('/api/repair-orders', {
       method: 'POST',
       body: JSON.stringify(data),

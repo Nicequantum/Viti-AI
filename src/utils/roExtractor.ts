@@ -253,6 +253,10 @@ export function mergeROExtractions(
   return {
     roNumber: pickNonEmpty(primary.roNumber, supplement.roNumber),
     customerName: pickNonEmpty(primary.customerName, supplement.customerName),
+    serviceAdvisorName: pickNonEmpty(
+      primary.serviceAdvisorName || '',
+      supplement.serviceAdvisorName || ''
+    ) || undefined,
     vehicle: mergeVehicleFields(primary.vehicle, supplement.vehicle),
     complaints: sanitizeComplaints(complaints),
   };
@@ -450,6 +454,37 @@ export function extractVehicleDetails(text: string): VehicleInfo {
   return { vin, year, make, model, mileageIn, mileageOut: '' };
 }
 
+const ADVISOR_LABEL_PATTERN =
+  /^(?:service\s+advisor(?:\s+name)?|svc\.?\s*advisor|advisor(?:\s+name)?|sa|writer)\s*:?\s*(.+)$/i;
+
+/** Extract service advisor name from RO header / structured Grok output. */
+export function extractServiceAdvisorFromText(text: string): string {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines.slice(0, 40)) {
+    const labeled = line.match(ADVISOR_LABEL_PATTERN);
+    if (labeled?.[1]) {
+      const name = labeled[1].trim();
+      if (name.length >= 3 && name.length <= 48 && /[A-Za-z]/.test(name)) return name;
+    }
+  }
+
+  const header = text.substring(0, 1200);
+  const inlinePatterns = [
+    /(?:service\s+advisor|svc\.?\s*advisor|advisor)\s*:?\s*([A-Z][A-Za-z'\-\.\s]{2,40})/i,
+    /\bSA\s*:?\s*([A-Z][A-Za-z'\-\.\s]{2,35})/,
+    /(?:written\s+by|prepared\s+by)\s*:?\s*([A-Z][A-Za-z'\-\.\s]{2,40})/i,
+  ];
+  for (const pattern of inlinePatterns) {
+    const match = header.match(pattern);
+    if (match?.[1]) {
+      const name = match[1].trim().replace(/\s{2,}/g, ' ');
+      if (name.length >= 3 && !/vin|mileage|customer|technician|tech\b/i.test(name)) return name;
+    }
+  }
+
+  return '';
+}
+
 export function extractCustomerName(text: string): string {
   const top = text.substring(0, 400);
   const patterns = [
@@ -472,6 +507,7 @@ export function parseStructuredROText(text: string): StructuredROExtraction {
   let structuredComplaints: string[] = [];
   let customerName = '';
   let roNumber = '';
+  let serviceAdvisorName = '';
 
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   let inComplaints = false;
@@ -480,6 +516,8 @@ export function parseStructuredROText(text: string): StructuredROExtraction {
     const lower = line.toLowerCase();
     if (lower.startsWith('ro number:')) {
       roNumber = (line.split(':')[1] || '').trim();
+    } else if (lower.startsWith('service advisor name:') || lower.startsWith('service advisor:')) {
+      serviceAdvisorName = (line.split(':').slice(1).join(':') || '').trim();
     } else if (lower.startsWith('year:')) {
       vehicle.year = (line.split(':')[1] || '').trim();
     } else if (lower.startsWith('make:')) {
@@ -550,6 +588,9 @@ export function parseStructuredROText(text: string): StructuredROExtraction {
     const m = text.match(/customer name[:\s]*([A-Z][A-Za-z'\-\s]{2,35})/i);
     if (m) customerName = m[1].trim();
   }
+  if (!serviceAdvisorName) {
+    serviceAdvisorName = extractServiceAdvisorFromText(text);
+  }
 
   const complaints = recoverComplaintsFromText(
     text,
@@ -561,7 +602,13 @@ export function parseStructuredROText(text: string): StructuredROExtraction {
   }
   vehicle.mileageIn = (vehicle.mileageIn || '').replace(/[^0-9]/g, '');
 
-  return { vehicle, complaints, customerName, roNumber };
+  return {
+    vehicle,
+    complaints,
+    customerName,
+    roNumber,
+    serviceAdvisorName: serviceAdvisorName || undefined,
+  };
 }
 
 export function extractRoNumberFromText(text: string): string {

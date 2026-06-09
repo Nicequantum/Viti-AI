@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 import {
   extractComplaints,
   extractLetterLabeledComplaints,
+  extractServiceAdvisorFromText,
   mergeROExtractions,
   parseStructuredROText,
 } from '../../src/utils/roExtractor';
@@ -105,5 +106,18 @@ C NOISE FROM REAR`;
     const merged = mergeROExtractions(grokParsed, ocrParsed, COLLAPSED_OCR_LINE);
     assert.equal(merged.complaints[0], 'RHODE ISLAND STATE INSPECTION');
     assert.ok(merged.complaints.length >= 1);
+  });
+
+  test('mergeROExtractions prefers non-empty service advisor name', () => {
+    const grokParsed = {
+      ...parseStructuredROText(GROK_OUTPUT_MISSING_A),
+      serviceAdvisorName: 'Maria Lopez',
+    };
+    const ocrParsed = parseStructuredROText(
+      'Service Advisor: JORDAN REYES\n' + COLLAPSED_OCR_LINE
+    );
+    const merged = mergeROExtractions(grokParsed, ocrParsed, COLLAPSED_OCR_LINE);
+    assert.equal(merged.serviceAdvisorName, 'Maria Lopez');
+    assert.equal(extractServiceAdvisorFromText('Service Advisor: JORDAN REYES'), 'JORDAN REYES');
   });
 });

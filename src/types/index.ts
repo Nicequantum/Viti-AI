@@ -42,6 +42,12 @@ export interface VehicleInfo {
   mileageOut: string;
 }
 
+export interface ServiceAdvisorSummary {
+  id: string;
+  displayName: string;
+  matchConfidence?: number;
+}
+
 export interface RepairOrder {
   id: string;
   roNumber: string;
@@ -50,6 +56,8 @@ export interface RepairOrder {
     name: string;
   };
   complaints: string[];
+  serviceAdvisor?: ServiceAdvisorSummary;
+  serviceAdvisorName?: string;
   xentryImages?: ImageAttachment[];
   xentryOcrTexts?: string[];
   repairLines: RepairLine[];
@@ -65,6 +73,7 @@ export interface StructuredROExtraction {
   complaints: string[];
   customerName: string;
   roNumber: string;
+  serviceAdvisorName?: string;
 }
 
 export interface MercedesSuggestions {
@@ -162,4 +171,6 @@ export const AUDIT_ACTIONS = [
   'user.reactivate',
   'user.password_reset',
   'image.upload',
+  'advisor.resolve',
+  'advisor.capture',
 ] as const;

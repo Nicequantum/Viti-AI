@@ -140,6 +140,8 @@ export function useRepairOrders({
         roNumber,
         vehicle,
         customerName: custName,
+        serviceAdvisorName: parsed.serviceAdvisorName,
+        advisorExtractionSource: 'ocr_fallback',
         complaints,
       } as never);
       setAllROs((prev) => [repairOrder, ...prev]);
@@ -152,13 +154,21 @@ export function useRepairOrders({
   }, []);
 
   const createROFromExtracted = useCallback(
-    async (extracted: { vehicle: RepairOrder['vehicle']; complaints: string[]; customerName: string; roNumber?: string }) => {
+    async (extracted: {
+      vehicle: RepairOrder['vehicle'];
+      complaints: string[];
+      customerName: string;
+      roNumber?: string;
+      serviceAdvisorName?: string;
+    }) => {
       try {
         const { repairOrder } = await api.createRepairOrder({
           fromExtraction: true,
           roNumber: extracted.roNumber || `R-${Date.now().toString().slice(-6)}`,
           vehicle: sanitizeVehicle(extracted.vehicle),
           customerName: extracted.customerName,
+          serviceAdvisorName: extracted.serviceAdvisorName,
+          advisorExtractionSource: 'grok',
           complaints: sanitizeComplaints(extracted.complaints || []),
         } as never);
         setAllROs((prev) => [repairOrder, ...prev]);

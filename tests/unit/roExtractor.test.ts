@@ -160,14 +160,19 @@ C NOISE FROM REAR`;
     assert.ok(!labeled.some((item) => ['E', 'I', 'L', 'N'].includes(item.letter)));
   });
 
-  test('extracts A-F from comma-separated hashtag label row with text on following lines', () => {
+  test('extracts A-F from vertical hashtag column with text below each label', () => {
     const text = `LINE OPCODE TECH TYPE HOURS
-# A, # B, # C, # D, # E, # F
+# A
 RHODE ISLAND STATE INSPECTION
+# B
 CHECK ENGINE LIGHT ON
+# C
 NOISE FROM REAR SUSPENSION
+# D
 BRAKE PULSATION AT STOP
+# E
 VIBRATION AT HIGHWAY SPEED
+# F
 SUNROOF WIND NOISE`;
     const labeled = extractLetterLabeledComplaintsWithLabels(text);
     assert.deepEqual(
@@ -178,9 +183,11 @@ SUNROOF WIND NOISE`;
     assert.equal(labeled[5].text, 'SUNROOF WIND NOISE');
   });
 
-  test('extracts inline comma-separated hashtag complaints on one line', () => {
-    const text =
-      '# A, RHODE ISLAND STATE INSPECTION, # B, CHECK ENGINE LIGHT ON, # C, BRAKE NOISE FROM FRONT';
+  test('extracts vertical column when label and text share the same line', () => {
+    const text = `LINE OPCODE TECH TYPE HOURS
+# A RHODE ISLAND STATE INSPECTION
+# B CHECK ENGINE LIGHT ON
+# C BRAKE NOISE FROM FRONT`;
     const labeled = extractLetterLabeledComplaintsWithLabels(text);
     assert.deepEqual(
       labeled.map((item) => item.letter),
@@ -189,18 +196,22 @@ SUNROOF WIND NOISE`;
     assert.equal(labeled[1].text, 'CHECK ENGINE LIGHT ON');
   });
 
-  test('recovers A-F across two pages and rejects Grok hallucinated letter fragments', () => {
+  test('recovers A-F across two pages in vertical column and rejects Grok hallucinated fragments', () => {
     const ocrText = `=== PAGE 1 ===
 LINE OPCODE TECH TYPE HOURS
-# A, # B, # C
+# A
 RHODE ISLAND STATE INSPECTION
+# B
 CHECK ENGINE LIGHT ON
+# C
 NOISE FROM REAR
 
 === PAGE 2 ===
-# D, # E, # F
+# D
 BRAKE PULSATION
+# E
 VIBRATION AT HIGHWAY SPEED
+# F
 SUNROOF WIND NOISE`;
 
     const grokGarbage = `Customer Complaints:

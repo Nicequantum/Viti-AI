@@ -16,9 +16,13 @@ const INSPECTION_DETAIL_LINE =
   /^(?:RISI\b|CDEF\b|PASSED\b|\d{3,}\s*(?:PASSED|CDEF|RISI)\b)/i;
 
 const LETTER_LABEL_PATTERN = /^([A-Z])\s+(.+)$/;
-const HASHTAG_LETTER_PART_PATTERN = /^#\s*([A-Z])\b[,\s:.\-–—]*\s*(.*)$/i;
+/** "# A" label only (optional trailing comma is OCR noise, not RO format). */
+const HASHTAG_LABEL_ONLY_LINE = /^#\s*([A-Z])\b\s*,?\s*$/i;
+/** "# A complaint text" on one line. */
+const HASHTAG_LABEL_WITH_TEXT_LINE = /^#\s*([A-Z])\b\s+(.+)$/i;
+const HASHTAG_LETTER_PART_PATTERN = /^#\s*([A-Z])\b\s+(.+)$/i;
 const LETTER_LABEL_OUTPUT_PATTERN = /^#?\s*([A-Z])[\.\)\:\s\-–—–—]+\s*(.+)$/i;
-/** Split only on explicit hashtag labels — never on capitals inside complaint words. */
+/** Split merged OCR only on explicit "# X" boundaries — never inside complaint words. */
 const HASHTAG_BOUNDARY_SPLIT = /\s+(?=#\s*[A-Z]\b)/i;
 
 export interface LabeledComplaint {
@@ -45,7 +49,7 @@ function parseHashtagComplaintPart(part: string): LabeledComplaint | null {
   if (!match) return null;
 
   const letter = match[1].toUpperCase();
-  let text = trimComplaintContinuation(match[2].replace(/^[,;\s]+/, '').replace(/[,;]+$/, '').trim());
+  let text = trimComplaintContinuation(match[2].trim());
   if (!text || /^#\s*[A-Z]\b/i.test(text)) return null;
   if (!isComplaintLetter(letter, text)) return null;
   return { letter, text };
@@ -71,39 +75,26 @@ function parseComplaintLabelSegment(segment: string): LabeledComplaint | null {
   return null;
 }
 
-/** Row that lists only labels, e.g. "# A, # B, # C, # D, # E, # F" with text on following lines. */
-function extractLabelOnlyRowLetters(line: string): string[] | null {
-  const matches = [...line.matchAll(/#\s*([A-Z])\b/gi)];
-  if (matches.length < 2) return null;
-
-  const remainder = line
-    .replace(/#\s*[A-Z]\b/gi, '')
-    .replace(/[,;.\s]/g, '')
-    .trim();
-  if (remainder.length > 0) return null;
-
-  return matches.map((m) => m[1].toUpperCase());
-}
-
-function collectFollowingComplaintLines(lines: string[], startIdx: number): string[] {
-  const texts: string[] = [];
+/** Complaint text on lines below a label-only row (# A alone, then text underneath). */
+function collectTextUntilNextHashtagLabel(lines: string[], startIdx: number): string {
+  const parts: string[] = [];
   for (let i = startIdx; i < lines.length; i++) {
     const line = lines[i];
+    if (/^#\s*[A-Z]\b/i.test(line)) break;
     if (/^LINE\s+OPCODE/i.test(line)) break;
-    if (/^#\s*[A-Z]\b/i.test(line)) {
-      if (extractLabelOnlyRowLetters(line)) continue;
-      if (parseHashtagComplaintPart(line.split(HASHTAG_BOUNDARY_SPLIT)[0] || line)) break;
-      break;
-    }
     if (/^(?:ro\s*#|vin|mileage|customer\s+name|service\s+advisor)/i.test(line)) break;
     if (isInspectionDetailLine(line)) continue;
 
     const c = normalizeComplaintContent(line);
-    if (isValidComplaintText(c)) texts.push(c);
+    if (isValidComplaintText(c)) parts.push(c);
   }
-  return texts;
+  return parts.join(' ');
 }
 
+/**
+ * Primary extractor: vertical column of # A / # B / # C labels (one per line, no commas).
+ * Also handles label + text on the same line, and OCR-merged lines.
+ */
 function extractHashtagLabeledBlocks(section: string): Map<string, string> {
   const byLetter = new Map<string, string>();
   const lines = section.replace(/\r\n/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean);
@@ -117,19 +108,29 @@ function extractHashtagLabeledBlocks(section: string): Map<string, string> {
       if (!line) continue;
     }
 
-    const labelOnlyLetters = extractLabelOnlyRowLetters(line);
-    if (labelOnlyLetters) {
-      const texts = collectFollowingComplaintLines(lines, lineIdx + 1);
-      labelOnlyLetters.forEach((letter, idx) => {
-        if (texts[idx]) addLetterComplaint(byLetter, letter, texts[idx]);
-      });
+    const hashtagCount = (line.match(/#\s*[A-Z]\b/gi) || []).length;
+    if (hashtagCount > 1) {
+      const parts = line.split(HASHTAG_BOUNDARY_SPLIT).filter(Boolean);
+      for (const part of parts) {
+        const parsed = parseHashtagComplaintPart(part);
+        if (parsed) addLetterComplaint(byLetter, parsed.letter, parsed.text);
+      }
       continue;
     }
 
-    const parts = line.split(HASHTAG_BOUNDARY_SPLIT).filter(Boolean);
-    for (const part of parts) {
-      const parsed = parseHashtagComplaintPart(part);
-      if (parsed) addLetterComplaint(byLetter, parsed.letter, parsed.text);
+    const labelOnly = line.match(HASHTAG_LABEL_ONLY_LINE);
+    if (labelOnly) {
+      const letter = labelOnly[1].toUpperCase();
+      const text = collectTextUntilNextHashtagLabel(lines, lineIdx + 1);
+      if (text) addLetterComplaint(byLetter, letter, text);
+      continue;
+    }
+
+    const labelWithText = line.match(HASHTAG_LABEL_WITH_TEXT_LINE);
+    if (labelWithText) {
+      const letter = labelWithText[1].toUpperCase();
+      const text = trimComplaintContinuation(labelWithText[2].trim());
+      if (isComplaintLetter(letter, text)) addLetterComplaint(byLetter, letter, text);
     }
   }
 

@@ -7,9 +7,13 @@ if (!globalThis.crypto) {
 }
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { POST as postConsent } from '../../src/app/api/consent/route';
+import { POST as postExtract } from '../../src/app/api/repair-orders/extract/route';
+import { POST as postGenerateStory } from '../../src/app/api/repair-orders/[id]/lines/[lineId]/generate-story/route';
 import { GET as getRepairOrder } from '../../src/app/api/repair-orders/[id]/route';
 import { GET as listRepairOrders } from '../../src/app/api/repair-orders/route';
 import { createSessionToken } from '../../src/lib/auth';
+import { CONSENT_REQUIRED_ERROR } from '../../src/lib/errors';
 import { repairLineToDbFields, repairOrderToDbFields } from '../../src/lib/roMapper';
 import { buildAuthenticatedRequest, readJsonResponse } from '../helpers/routeTest';
 
@@ -22,7 +26,11 @@ describe('tenant isolation (route handlers)', () => {
   let techBId = '';
   let techAToken = '';
   let techBToken = '';
+  let managerBToken = '';
+  let techNoConsentToken = '';
   let roAId = '';
+  let lineAId = '';
+  const privatePathname = 'benz-tech/tenant-isolation-private.jpg';
 
   before(async () => {
     const passwordHash = await bcrypt.hash('changeme123', 12);
@@ -73,6 +81,36 @@ describe('tenant isolation (route handlers)', () => {
     });
     techBId = techB.id;
 
+    const managerB = await prisma.technician.upsert({
+      where: { email: 'tenant-manager-b@dealership.com' },
+      update: { dealershipId: dealershipBId },
+      create: {
+        email: 'tenant-manager-b@dealership.com',
+        name: 'Tenant Manager B',
+        passwordHash,
+        role: 'manager',
+        isActive: true,
+        dealershipId: dealershipBId,
+        consentAt: new Date(),
+        consentVersion: '2026-06-07-v1',
+      },
+    });
+
+    const techNoConsent = await prisma.technician.upsert({
+      where: { email: 'tenant-no-consent@dealership.com' },
+      update: { dealershipId: dealershipAId, consentAt: null, consentVersion: null },
+      create: {
+        email: 'tenant-no-consent@dealership.com',
+        name: 'Tenant No Consent',
+        passwordHash,
+        role: 'technician',
+        isActive: true,
+        dealershipId: dealershipAId,
+        consentAt: null,
+        consentVersion: null,
+      },
+    });
+
     techAToken = await createSessionToken({
       technicianId: techA.id,
       email: techA.email,
@@ -93,6 +131,28 @@ describe('tenant isolation (route handlers)', () => {
       dealershipName: dealershipB.name,
       consentAt: techB.consentAt?.toISOString() ?? null,
       sessionVersion: techB.sessionVersion,
+    });
+
+    managerBToken = await createSessionToken({
+      technicianId: managerB.id,
+      email: managerB.email,
+      name: managerB.name,
+      role: managerB.role,
+      dealershipId: dealershipBId,
+      dealershipName: dealershipB.name,
+      consentAt: managerB.consentAt?.toISOString() ?? null,
+      sessionVersion: managerB.sessionVersion,
+    });
+
+    techNoConsentToken = await createSessionToken({
+      technicianId: techNoConsent.id,
+      email: techNoConsent.email,
+      name: techNoConsent.name,
+      role: techNoConsent.role,
+      dealershipId: dealershipAId,
+      dealershipName: dealershipA.name,
+      consentAt: null,
+      sessionVersion: techNoConsent.sessionVersion,
     });
 
     const roInput = {
@@ -129,16 +189,46 @@ describe('tenant isolation (route handlers)', () => {
           create: roInput.repairLines.map((line) => repairLineToDbFields(line)),
         },
       },
+      include: { repairLines: true },
     });
     roAId = created.id;
+    lineAId = created.repairLines[0]!.id;
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'image.upload',
+        dealershipId: dealershipAId,
+        technicianId: techAId,
+        metadata: JSON.stringify({ pathname: privatePathname, filename: 'private.jpg', size: 1024 }),
+        previousHash: 'GENESIS',
+        entryHash: `tenant-test-upload-${Date.now()}`,
+      },
+    });
   });
 
   after(async () => {
     if (roAId) {
       await prisma.repairOrder.delete({ where: { id: roAId } }).catch(() => undefined);
     }
+    await prisma.auditLog.deleteMany({
+      where: {
+        OR: [
+          { dealershipId: { in: [dealershipAId, dealershipBId] } },
+          { technicianId: { in: [techAId, techBId] } },
+        ],
+      },
+    });
     await prisma.technician.deleteMany({
-      where: { email: { in: ['tenant-a@dealership.com', 'tenant-b@dealership.com'] } },
+      where: {
+        email: {
+          in: [
+            'tenant-a@dealership.com',
+            'tenant-b@dealership.com',
+            'tenant-manager-b@dealership.com',
+            'tenant-no-consent@dealership.com',
+          ],
+        },
+      },
     });
     await prisma.dealership.deleteMany({
       where: { id: { in: ['tenant-test-a', 'tenant-test-b'] } },
@@ -179,5 +269,50 @@ describe('tenant isolation (route handlers)', () => {
       !bodyB.repairOrders.some((ro) => ro.id === roAId),
       'Tech B must not see dealership A RO in list'
     );
+  });
+
+  test('manager B cannot generate story for dealership A repair order', async () => {
+    const request = buildAuthenticatedRequest(
+      `http://localhost/api/repair-orders/${roAId}/lines/${lineAId}/generate-story`,
+      managerBToken,
+      { method: 'POST' }
+    );
+    const response = await postGenerateStory(request, {
+      params: Promise.resolve({ id: roAId, lineId: lineAId }),
+    });
+    const { status } = await readJsonResponse<{ error?: string }>(response);
+
+    assert.equal(status, 404, 'Cross-tenant generate-story must return 404 (not found)');
+  });
+
+  test('technician B cannot extract RO from dealership A uploaded image', async () => {
+    const request = buildAuthenticatedRequest('http://localhost/api/repair-orders/extract', techBToken, {
+      method: 'POST',
+      body: { imagePathnames: [privatePathname] },
+    });
+    const response = await postExtract(request);
+    const { status } = await readJsonResponse<{ error?: string }>(response);
+
+    assert.equal(status, 403, 'Cross-tenant blob extract must return 403');
+  });
+
+  test('technician without consent cannot access protected APIs', async () => {
+    const request = buildAuthenticatedRequest('http://localhost/api/repair-orders', techNoConsentToken);
+    const response = await listRepairOrders(request);
+    const { status, body } = await readJsonResponse<{ error?: string }>(response);
+
+    assert.equal(status, 403);
+    assert.equal(body.error, CONSENT_REQUIRED_ERROR);
+  });
+
+  test('technician without consent can still accept consent', async () => {
+    const request = buildAuthenticatedRequest('http://localhost/api/consent', techNoConsentToken, {
+      method: 'POST',
+    });
+    const response = await postConsent(request);
+    const { status, body } = await readJsonResponse<{ consentAt?: string }>(response);
+
+    assert.equal(status, 200);
+    assert.ok(body.consentAt);
   });
 });

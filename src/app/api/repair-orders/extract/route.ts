@@ -1,8 +1,9 @@
 import { fetchPrivateBlobAsDataUrl } from '@/lib/blob';
 import { withAuth } from '@/lib/apiRoute';
 import { extractROFromImages } from '@/lib/grok';
-import { apiError, VALIDATION_ERROR } from '@/lib/errors';
-import { extractPathnameFromImageRef } from '@/lib/imageUrls';
+import { apiError, FORBIDDEN_ERROR, VALIDATION_ERROR } from '@/lib/errors';
+import { userCanAccessImage } from '@/lib/imageAccess';
+import { extractPathnameFromImageRef, isAllowedImagePathname } from '@/lib/imageUrls';
 import { imagePathnamesSchema, parseBody } from '@/lib/validation';
 
 export const maxDuration = 60;
@@ -10,7 +11,7 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   return withAuth(
     request,
-    async () => {
+    async (session) => {
       const body = await request.json();
       const parsed = parseBody(imagePathnamesSchema, body);
       if ('error' in parsed) {
@@ -18,6 +19,17 @@ export async function POST(request: Request) {
       }
 
       const pathnames = parsed.data.imagePathnames.map((ref) => extractPathnameFromImageRef(ref) || ref);
+
+      for (const pathname of pathnames) {
+        if (!isAllowedImagePathname(pathname)) {
+          return apiError(FORBIDDEN_ERROR, 403);
+        }
+        const allowed = await userCanAccessImage(session, pathname);
+        if (!allowed) {
+          return apiError(FORBIDDEN_ERROR, 403);
+        }
+      }
+
       const imageDataUrls = await Promise.all(pathnames.map((pathname) => fetchPrivateBlobAsDataUrl(pathname)));
       const extracted = await extractROFromImages(imageDataUrls);
       return extracted;

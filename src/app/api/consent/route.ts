@@ -27,6 +27,6 @@ export async function POST(request: Request) {
 
       return { consentAt: now.toISOString() };
     },
-    { rateLimitKey: 'consent' }
+    { rateLimitKey: 'consent', skipConsent: true }
   );
 }

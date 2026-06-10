@@ -24,7 +24,9 @@ export async function POST(
         include: { repairLines: true },
       });
 
-      if (!ro) return apiError(NOT_FOUND_ERROR, 404);
+      if (!ro || ro.dealershipId !== session.dealershipId) {
+        return apiError(NOT_FOUND_ERROR, 404);
+      }
       if (session.role !== 'manager' && ro.technicianId !== session.technicianId) {
         return apiError('You do not have permission to perform this action.', 403);
       }

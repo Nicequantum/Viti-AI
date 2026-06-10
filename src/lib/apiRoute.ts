@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getSession } from './auth';
-import { apiError, FORBIDDEN_ERROR, GENERIC_ERROR, handleRouteError, UNAUTHORIZED_ERROR } from './errors';
+import {
+  apiError,
+  CONSENT_REQUIRED_ERROR,
+  FORBIDDEN_ERROR,
+  GENERIC_ERROR,
+  handleRouteError,
+  UNAUTHORIZED_ERROR,
+} from './errors';
 import { checkRateLimit, RATE_LIMITS, type RateLimitConfig } from './rate-limit';
 
 type Session = NonNullable<Awaited<ReturnType<typeof getSession>>>;
@@ -9,6 +16,8 @@ interface RouteOptions {
   rateLimitKey?: string;
   rateLimit?: RateLimitConfig;
   requireManager?: boolean;
+  /** When true, allow the route before privacy consent is recorded (e.g. POST /api/consent). */
+  skipConsent?: boolean;
 }
 
 export async function withAuth<T>(
@@ -30,6 +39,10 @@ export async function withAuth<T>(
 
   if (options.requireManager && session.role !== 'manager') {
     return apiError(FORBIDDEN_ERROR, 403);
+  }
+
+  if (!options.skipConsent && !session.consentAt) {
+    return apiError(CONSENT_REQUIRED_ERROR, 403);
   }
 
   try {

@@ -32,6 +32,13 @@ export interface RepairLine {
   warrantyStory?: string;
 }
 
+export interface VehicleWarrantyInfo {
+  factoryWarranty?: string;
+  cpoWarranty?: string;
+  extendedElaWarranty?: string;
+  serviceHistoryNotes?: string;
+}
+
 export interface VehicleInfo {
   vin: string;
   year: string;
@@ -40,6 +47,8 @@ export interface VehicleInfo {
   engine?: string;
   mileageIn: string;
   mileageOut: string;
+  /** Populated from VMI pages — never from RO complaint lines. */
+  warrantyInfo?: VehicleWarrantyInfo;
 }
 
 export interface ServiceAdvisorSummary {

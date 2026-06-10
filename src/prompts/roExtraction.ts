@@ -1,5 +1,11 @@
 export const RO_EXTRACTION_PROMPT = `Use OCR to carefully analyze ALL provided repair order image(s). Extract vehicle header fields from the top section AND extract EVERY customer complaint line from the complaint/labor section.
 
+SEPARATE DOCUMENT — VMI (Vehicle Master Inquiry):
+Some scans include a VMI page (Vehicle Master Inquiry) alongside the Repair Order. VMI is a DIFFERENT document with factory warranty dates, CPO warranty, extended ELA warranty, and service history.
+- Do NOT extract VMI warranty lines as customer complaints.
+- Do NOT mix VMI text into complaint letters A–Z.
+- Ignore VMI pages for the Customer Complaints section below (on-device OCR handles VMI warranty fields separately).
+
 VEHICLE FIELDS (top header):
 - RO Number: top center (near "RO #", "Repair Order", "Work Order")
 - Customer Name: customer section

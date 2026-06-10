@@ -24,6 +24,12 @@ import {
   sanitizeVehicle,
 } from '@/utils/roExtractor';
 import { normalizeScanFiles } from '@/utils/scanFileHelpers';
+import {
+  classifyScanPages,
+  combineRepairOrderPages,
+  combineVmiPages,
+} from '@/utils/scanDocumentClassifier';
+import { extractVmiWarrantyInfo, mergeVehicleWarrantyInfo } from '@/utils/vmiExtractor';
 import { uploadFileAsAttachment, uploadFilesAsAttachments } from '@/utils/uploadHelpers';
 
 interface UseRepairOrdersOptions {
@@ -253,11 +259,26 @@ export function useRepairOrders({
           throw new Error('Could not read the repair order. Try sharper photos or fewer pages.');
         }
 
-        const ocrExtracted = ocrText ? parseStructuredROText(ocrText) : null;
-        const extracted =
+        const classifiedPages = classifyScanPages(ocrText || '');
+        const roOcrText = combineRepairOrderPages(classifiedPages) || ocrText || '';
+        const vmiOcrText = combineVmiPages(classifiedPages);
+        const vmiWarranty = extractVmiWarrantyInfo(vmiOcrText);
+
+        const ocrExtracted = roOcrText ? parseStructuredROText(roOcrText) : null;
+        let extracted =
           grokExtracted && ocrExtracted
-            ? mergeROExtractions(grokExtracted, ocrExtracted, ocrText)
-            : grokExtracted || ocrExtracted || parseStructuredROText(ocrText || '');
+            ? mergeROExtractions(grokExtracted, ocrExtracted, roOcrText)
+            : grokExtracted || ocrExtracted || parseStructuredROText(roOcrText || '');
+
+        if (vmiWarranty && Object.keys(vmiWarranty).length > 0) {
+          extracted = {
+            ...extracted,
+            vehicle: {
+              ...extracted.vehicle,
+              warrantyInfo: mergeVehicleWarrantyInfo(extracted.vehicle.warrantyInfo, vmiWarranty),
+            },
+          };
+        }
 
         if (scanCancelledRef.current) return;
         setOcrProgress(88);

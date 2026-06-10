@@ -492,6 +492,61 @@ CHECK ENGINE LIGHT ON`;
     assert.equal(labeled[1].text, 'CHECK ENGINE LIGHT ON');
   });
 
+  test('Line A ignores OCR garbage merged from above the complaint header', () => {
+    const text = `RO 482910 JOHN SMITH W1N4N4HB5NJ123456 LINE OP CODE TECH TYPE DESCRIPTION / INSTRUCTIONS Drop-off loaner car or van supplied
+# B
+CHECK ENGINE LIGHT ON`;
+    const labeled = extractLetterLabeledComplaintsWithLabels(text);
+    assert.equal(labeled[0].letter, 'A');
+    assert.equal(labeled[0].text, 'Drop-off loaner car or van supplied');
+    assert.ok(!labeled[0].text.includes('W1N4N4HB5NJ123456'));
+    assert.ok(!labeled[0].text.includes('JOHN SMITH'));
+  });
+
+  test('duplicate advisor Line B does not create a separate Line C', () => {
+    const text = `LINE OP CODE TECH TYPE DESCRIPTION / INSTRUCTIONS
+# A
+STATE INSPECTION
+# B
+CUSTOMER STATES CHECK ENGINE LIGHT ON
+# B
+CUSTOMER STATES CHECK ENGINE LIGHT ON
+# C
+NOISE FROM REAR`;
+    const labeled = extractLetterLabeledComplaintsWithLabels(text);
+    assert.deepEqual(
+      labeled.map((item) => item.letter),
+      ['A', 'B', 'C']
+    );
+    assert.equal(labeled[1].text, 'CHECK ENGINE LIGHT ON');
+    assert.equal(labeled[2].text, 'NOISE FROM REAR');
+  });
+
+  test('page 2 carryover before # F attaches to Line E not Line F', () => {
+    const text = `LINE OP CODE TECH TYPE DESCRIPTION / INSTRUCTIONS
+# A
+STATE INSPECTION
+# B
+CHECK ENGINE LIGHT ON
+# C
+NOISE FROM REAR
+# D
+BRAKE PULSATION
+# E
+QUALITY CONTROL INSP
+
+=== PAGE 2 ===
+ECTION STILL PENDING FINAL DETAIL
+# F
+SUNROOF WIND NOISE`;
+
+    const recovered = recoverComplaintsWithLabelsFromText(text);
+    assert.deepEqual(recovered.labels, ['A', 'B', 'C', 'D', 'E', 'F']);
+    assert.ok(recovered.complaints[4].includes('QUALITY CONTROL'));
+    assert.ok(recovered.complaints[4].includes('ECTION STILL PENDING FINAL DETAIL'));
+    assert.equal(recovered.complaints[5], 'SUNROOF WIND NOISE');
+  });
+
   test('does not copy duplicate Line B text onto Line A when A is recovered from header', () => {
     const ocrText = `LINE OP CODE TECH TYPE DESCRIPTION / INSTRUCTIONS Drop-off loaner car or van supplied
 # B

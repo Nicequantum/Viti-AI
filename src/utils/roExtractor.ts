@@ -38,6 +38,12 @@ const HASHTAG_BOUNDARY_SPLIT = new RegExp(`\\s+(?=#\\s*${COMPLAINT_SLOT_PATTERN}
 const COMPLAINT_SECTION_END =
   /^(?:authorized|customer\s+signature|technician\s+signature|tech\s+signature|total\s+(?:due|charges)|grand\s+total|subtotal|disclaimer|warranty\s+disclaimer)/i;
 
+const PRE_COMPLAINT_FIELD_NOISE =
+  /^(?:ro\s*#?|repair\s+order|work\s+order|customer|name|vin|mileage|odometer|year|make|model|service\s+advisor|svc|advisor|writer|phone|date|tag|plate|state|zip|acct|account|mr|mrs|ms|dr)\b/i;
+
+const VMI_INLINE_NOISE =
+  /\b(?:vehicle\s+master\s+inquiry|factory\s+warranty|cpo\s+warranty|extended\s+ela|service\s+history\s+summary)\b/gi;
+
 function isComplaintSlotLetter(letter: string): boolean {
   return COMPLAINT_SLOT_RE.test(letter.toUpperCase());
 }
@@ -248,6 +254,41 @@ function isHashtagLabelOnlyLine(line: string): string | null {
   return match ? match[1].toUpperCase() : null;
 }
 
+function letterBefore(letter: string): string | null {
+  const code = letter.toUpperCase().charCodeAt(0);
+  if (code <= 65) return null;
+  return String.fromCharCode(code - 1);
+}
+
+function chunkHasComplaintHeader(text: string): boolean {
+  return COMPLAINT_SECTION_HEADERS.some((marker) => marker.test(text));
+}
+
+/** Strip header/VIN/VMI tokens OCR merged into jammed Line A text. */
+function sanitizeJammedLineAText(text: string): string {
+  let cleaned = normalizeComplaintForDisplay(text.replace(VMI_INLINE_NOISE, ' '));
+  if (!cleaned) return '';
+
+  cleaned = cleaned.replace(/\b[A-HJ-NPR-Z0-9]{17}\b/gi, ' ').replace(/\bRO\s*#?\s*[A-Z0-9\-]{3,12}\b/gi, ' ');
+  cleaned = cleaned.replace(/\b\d{4,7}\s*(?:mi|miles|km)?\b/gi, ' ');
+
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  while (words.length > 0 && PRE_COMPLAINT_FIELD_NOISE.test(words[0])) {
+    words.shift();
+  }
+
+  const filtered = words.filter(
+    (word) =>
+      word.length >= 2 &&
+      /[A-Za-z]/.test(word) &&
+      !/^[_=+\-*\\#@$%^&]+$/.test(word) &&
+      !/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(word)
+  );
+
+  const rebuilt = filtered.join(' ').trim();
+  return acceptLabeledComplaintText(rebuilt) || '';
+}
+
 /** Parse complaint text jammed directly against the LINE OP CODE header (often missing # A). */
 function extractJammedLineAFromHeaderTail(remainder: string): string {
   const trimmed = remainder.trim();
@@ -258,7 +299,7 @@ function extractJammedLineAFromHeaderTail(remainder: string): string {
     const textOnly = hashInline[1]
       .split(new RegExp(`\\s+#\\s*${COMPLAINT_SLOT_PATTERN}\\b`, 'i'))[0]
       .trim();
-    return acceptLabeledComplaintText(textOnly) || '';
+    return sanitizeJammedLineAText(textOnly);
   }
 
   const beforeNextLabel = trimmed.split(
@@ -268,12 +309,12 @@ function extractJammedLineAFromHeaderTail(remainder: string): string {
 
   const letterInline = segment.match(/^A(?:[\\.\\)\\:\\s\\-–—]+|\s+)(.+)$/i);
   if (letterInline) {
-    return acceptLabeledComplaintText(trimComplaintContinuation(letterInline[1])) || '';
+    return sanitizeJammedLineAText(trimComplaintContinuation(letterInline[1]));
   }
 
   if (!new RegExp(`^#\\s*${COMPLAINT_SLOT_PATTERN}\\b`, 'i').test(segment)) {
-    const raw = acceptLabeledComplaintText(segment.replace(/^#\s*A\b\s*/i, ''));
-    if (raw && (isPlausibleComplaintText(raw) || isShortServiceLine(raw))) return raw;
+    const raw = sanitizeJammedLineAText(segment.replace(/^#\s*A\b\s*/i, ''));
+    if (raw) return raw;
   }
 
   return '';
@@ -281,8 +322,10 @@ function extractJammedLineAFromHeaderTail(remainder: string): string {
 
 function recoverLineAFromHeaderText(text: string): string {
   for (const line of text.replace(/\r\n/g, '\n').split('\n')) {
-    if (!HEADER_ROW_PATTERN.test(line)) continue;
-    const jammed = extractJammedLineAFromHeaderTail(line.replace(HEADER_ROW_STRIP_PATTERN, ' ').trim());
+    const headerMatch = line.match(HEADER_ROW_PATTERN);
+    if (!headerMatch || headerMatch.index === undefined) continue;
+    const remainder = line.slice(headerMatch.index + headerMatch[0].length).trim();
+    const jammed = extractJammedLineAFromHeaderTail(remainder);
     if (jammed) return jammed;
   }
   return '';
@@ -322,7 +365,7 @@ function recoverMissingLineA(paired: LabeledComplaint[], rawText: string): Label
   const section = getComplaintSection(rawText.replace(/\r\n/g, '\n'));
   const timeline = buildComplaintTimeline(preprocessComplaintSectionLines(section));
   const firstLabelIdx = timeline.findIndex((entry) => entry.kind === 'label');
-  if (firstLabelIdx > 0 && needsA && !byLetter.get('A')) {
+  if (firstLabelIdx > 0 && needsA && !byLetter.get('A') && chunkHasComplaintHeader(rawText)) {
     const firstLetter = (timeline[firstLabelIdx] as Extract<ComplaintTimelineEntry, { kind: 'label' }>)
       .letter;
     if (firstLetter !== 'A') {
@@ -331,7 +374,7 @@ function recoverMissingLineA(paired: LabeledComplaint[], rawText: string): Label
         .filter((entry) => entry.kind === 'text')
         .map((entry) => (entry as Extract<ComplaintTimelineEntry, { kind: 'text' }>).text)
         .join(' ');
-      const recovered = pickPairedComplaintText(orphan) || acceptLabeledComplaintText(orphan);
+      const recovered = sanitizeJammedLineAText(orphan);
       if (recovered) byLetter.set('A', recovered);
     }
   }
@@ -417,6 +460,26 @@ function resolveDuplicateComplaintTexts(
   return resolved;
 }
 
+/** Advisor duplicated the same complaint — keep first slot only, drop later identical slots. */
+function collapseDuplicateAdvisorSlots(paired: LabeledComplaint[]): LabeledComplaint[] {
+  const seenTexts = new Set<string>();
+  const collapsed: LabeledComplaint[] = [];
+
+  for (const item of paired) {
+    const normalized = normalizeComplaintForDisplay(item.text);
+    if (!normalized) {
+      collapsed.push(item);
+      continue;
+    }
+    const key = normalized.toLowerCase();
+    if (seenTexts.has(key)) continue;
+    seenTexts.add(key);
+    collapsed.push({ letter: item.letter, text: normalized });
+  }
+
+  return collapsed;
+}
+
 function preprocessComplaintSectionLines(section: string): string[] {
   const lines = section
     .replace(PAGE_MARKER_PATTERN, '\n')
@@ -431,7 +494,11 @@ function preprocessComplaintSectionLines(section: string): string[] {
       continue;
     }
     if (HEADER_ROW_PATTERN.test(line)) {
-      const remainder = line.replace(HEADER_ROW_STRIP_PATTERN, ' ').trim();
+      const headerMatch = line.match(HEADER_ROW_PATTERN);
+      const remainder =
+        headerMatch && headerMatch.index !== undefined
+          ? line.slice(headerMatch.index + headerMatch[0].length).trim()
+          : line.replace(HEADER_ROW_STRIP_PATTERN, ' ').trim();
       if (!remainder) continue;
       const jammedA = extractJammedLineAFromHeaderTail(remainder);
       if (jammedA) {
@@ -533,14 +600,18 @@ function pickPairedComplaintText(raw: string): string {
  * Pair labels with complaint text for dealership column layout.
  * Uses strict plausible-text filtering (da16e88) with controlled page-2 continuations.
  */
-function pairComplaintTimeline(timeline: ComplaintTimelineEntry[]): LabeledComplaint[] {
+function pairComplaintTimeline(
+  timeline: ComplaintTimelineEntry[],
+  options: { recoverOrphanAsLineA?: boolean } = {}
+): LabeledComplaint[] {
+  const recoverOrphanAsLineA = options.recoverOrphanAsLineA ?? true;
   const results: LabeledComplaint[] = [];
   let index = 0;
 
   while (index < timeline.length) {
     if (timeline[index].kind === 'text') {
       const orphan = (timeline[index] as Extract<ComplaintTimelineEntry, { kind: 'text' }>).text;
-      if (results.length === 0) {
+      if (recoverOrphanAsLineA && results.length === 0) {
         let scan = index + 1;
         while (scan < timeline.length && timeline[scan].kind === 'text') scan++;
         if (scan < timeline.length && timeline[scan].kind === 'label') {
@@ -548,7 +619,7 @@ function pairComplaintTimeline(timeline: ComplaintTimelineEntry[]): LabeledCompl
             timeline[scan] as Extract<ComplaintTimelineEntry, { kind: 'label' }>
           ).letter;
           if (firstLetter !== 'A') {
-            const recovered = pickPairedComplaintText(orphan) || acceptLabeledComplaintText(orphan);
+            const recovered = sanitizeJammedLineAText(orphan);
             if (recovered) {
               results.push({ letter: 'A', text: recovered });
               index++;
@@ -638,6 +709,7 @@ export function extractOrderedHashtagComplaints(text: string): LabeledComplaint[
       const timeline = buildComplaintTimeline(lines);
 
       let leadingOrphan = '';
+      let firstLabelOnPage: string | null = null;
       const firstLabelIdx = timeline.findIndex((entry) => entry.kind === 'label');
       if (firstLabelIdx > 0) {
         leadingOrphan = timeline
@@ -646,8 +718,15 @@ export function extractOrderedHashtagComplaints(text: string): LabeledComplaint[
           .map((entry) => (entry as Extract<ComplaintTimelineEntry, { kind: 'text' }>).text)
           .join(' ');
       }
+      if (firstLabelIdx >= 0) {
+        firstLabelOnPage = (
+          timeline[firstLabelIdx] as Extract<ComplaintTimelineEntry, { kind: 'label' }>
+        ).letter;
+      }
 
-      const pagePaired = pairComplaintTimeline(timeline);
+      const pagePaired = pairComplaintTimeline(timeline, {
+        recoverOrphanAsLineA: chunkHasComplaintHeader(chunk) && i === 0,
+      });
 
       if (
         i > 0 &&
@@ -656,11 +735,14 @@ export function extractOrderedHashtagComplaints(text: string): LabeledComplaint[
         perPage.length > 0
       ) {
         const prevPage = perPage[perPage.length - 1];
-        if (prevPage.length > 0) {
-          const last = prevPage[prevPage.length - 1];
-          const merged = normalizeComplaintForDisplay(`${last.text} ${leadingOrphan}`.trim());
+        const priorLetter = firstLabelOnPage ? letterBefore(firstLabelOnPage) : null;
+        const target =
+          (priorLetter && prevPage.find((item) => item.letter === priorLetter)) ||
+          prevPage[prevPage.length - 1];
+        if (target) {
+          const merged = normalizeComplaintForDisplay(`${target.text} ${leadingOrphan}`.trim());
           if (merged && (isPlausibleComplaintText(merged) || isShortServiceLine(merged))) {
-            last.text = merged;
+            target.text = merged;
           }
         }
       }
@@ -678,6 +760,7 @@ export function extractOrderedHashtagComplaints(text: string): LabeledComplaint[
   const { complaints, labels } = labeledComplaintsToArrays(paired);
   const deduped = resolveDuplicateComplaintTexts(labels, complaints, new Map(), normalized);
   paired = labels.map((letter, idx) => ({ letter, text: deduped[idx] || '' }));
+  paired = collapseDuplicateAdvisorSlots(paired);
   return ensureComplaintSlotLetters(paired, normalized);
 }
 
@@ -1017,7 +1100,10 @@ function mergeComplaintsWithGrokFallback(
     }
 
     const dedupedComplaints = resolveDuplicateComplaintTexts(labels, complaints, grokMap, ocrText);
-    return { complaints: dedupedComplaints, labels };
+    const collapsed = collapseDuplicateAdvisorSlots(
+      labels.map((letter, idx) => ({ letter, text: dedupedComplaints[idx] || '' }))
+    );
+    return labeledComplaintsToArrays(collapsed);
   }
 
   return recoverComplaintsWithLabelsFromText(ocrText, grokPrimary.complaints);
@@ -1138,6 +1224,21 @@ function pickNonEmpty(primary: string, fallback: string): string {
 }
 
 function mergeVehicleFields(primary: VehicleInfo, supplement: VehicleInfo): VehicleInfo {
+  const warrantyInfo =
+    primary.warrantyInfo || supplement.warrantyInfo
+      ? {
+          factoryWarranty:
+            primary.warrantyInfo?.factoryWarranty || supplement.warrantyInfo?.factoryWarranty,
+          cpoWarranty: primary.warrantyInfo?.cpoWarranty || supplement.warrantyInfo?.cpoWarranty,
+          extendedElaWarranty:
+            primary.warrantyInfo?.extendedElaWarranty ||
+            supplement.warrantyInfo?.extendedElaWarranty,
+          serviceHistoryNotes:
+            primary.warrantyInfo?.serviceHistoryNotes ||
+            supplement.warrantyInfo?.serviceHistoryNotes,
+        }
+      : undefined;
+
   return {
     vin: pickNonEmpty(primary.vin, supplement.vin),
     year: pickNonEmpty(primary.year, supplement.year),
@@ -1146,6 +1247,7 @@ function mergeVehicleFields(primary: VehicleInfo, supplement: VehicleInfo): Vehi
     engine: pickNonEmpty(primary.engine || '', supplement.engine || '') || undefined,
     mileageIn: pickNonEmpty(primary.mileageIn, supplement.mileageIn),
     mileageOut: pickNonEmpty(primary.mileageOut, supplement.mileageOut),
+    warrantyInfo: warrantyInfo && Object.values(warrantyInfo).some(Boolean) ? warrantyInfo : undefined,
   };
 }
 

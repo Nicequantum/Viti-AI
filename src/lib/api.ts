@@ -13,6 +13,7 @@ import type {
   StructuredROExtraction,
   TechnicianSession,
   TemplateCategory,
+  ExtractedData,
 } from '@/types';
 
 export interface TechnicianUser {
@@ -164,6 +165,13 @@ export const api = {
     apiFetch<StructuredROExtraction>('/api/repair-orders/extract', {
       method: 'POST',
       body: JSON.stringify({ imagePathnames }),
+      timeoutMs: 95_000,
+    }),
+
+  extractDiagnostics: (imagePathname: string) =>
+    apiFetch<ExtractedData>('/api/diagnostics/extract', {
+      method: 'POST',
+      body: JSON.stringify({ imagePathnames: [imagePathname] }),
       timeoutMs: 95_000,
     }),
 

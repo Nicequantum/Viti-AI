@@ -43,8 +43,15 @@ const vehicleSchema = z.object({
   mileageOut: safeTextOptional(16),
 });
 
+const faultCodeSchema = z.object({
+  code: safeText(32),
+  description: safeText(500),
+  status: safeText(32).optional(),
+});
+
 const extractedDataSchema = z.object({
   codes: z.array(safeText(128)).optional(),
+  faultCodes: z.array(faultCodeSchema).max(30).optional(),
   guidedTests: z.array(safeText(2000)).optional(),
   measurements: z
     .array(

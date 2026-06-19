@@ -1,6 +1,8 @@
 import { Camera, Plus, Trash2 } from 'lucide-react';
+import { ExtractedDataPreview } from '@/components/ExtractedDataPreview';
 import { StableInput } from '@/components/StableInput';
 import { StableTextarea } from '@/components/StableTextarea';
+import { XentryImageGallery } from '@/components/XentryImageGallery';
 import type { RepairOrder } from '../types';
 
 interface ROViewProps {
@@ -16,6 +18,7 @@ interface ROViewProps {
   onRemoveComplaint: (index: number) => void;
   onDecodeVin: () => void;
   onAddROXentryPhotos: () => void;
+  onDeleteROXentryImage: (imageId: string) => void;
   onAddRepairLine: () => void;
   onOpenLine: (lineId: string) => void;
   onDeleteRO: () => void;
@@ -38,6 +41,7 @@ export function ROView({
   onRemoveComplaint,
   onDecodeVin,
   onAddROXentryPhotos,
+  onDeleteROXentryImage,
   onAddRepairLine,
   onOpenLine,
   onDeleteRO,
@@ -224,41 +228,9 @@ export function ROView({
           {isProcessingOCR ? `ANALYZING... ${ocrProgress}%` : 'SCAN / ADD XENTRY PHOTOS (QT, CODES, GUIDED, WIRING...)'}
         </button>
         {ro.xentryImages && ro.xentryImages.length > 0 && (
-          <div className="grid grid-cols-4 gap-2 mb-2">
-            {ro.xentryImages.map((img) => (
-              <img
-                key={img.id}
-                src={img.url}
-                className="w-full h-16 object-cover rounded border border-[#38383a] cursor-pointer"
-                alt={img.name}
-                onClick={() => window.open(img.url)}
-              />
-            ))}
-          </div>
+          <XentryImageGallery images={ro.xentryImages} onDeleteImage={onDeleteROXentryImage} />
         )}
-        {ro.repairLines[0]?.extractedData &&
-          (ro.repairLines[0].extractedData.codes.length > 0 ||
-            ro.repairLines[0].extractedData.guidedTests.length > 0 ||
-            ro.repairLines[0].extractedData.measurements.length > 0) && (
-            <div className="text-[10px] bg-[#1c1c1e] p-2 rounded">
-              <div className="font-semibold mb-0.5">Extracted:</div>
-              {ro.repairLines[0].extractedData.codes.length > 0 && (
-                <div>Codes: {ro.repairLines[0].extractedData.codes.join(', ')}</div>
-              )}
-              {ro.repairLines[0].extractedData.guidedTests.length > 0 && (
-                <div>Guided: {ro.repairLines[0].extractedData.guidedTests.slice(0, 2).join(' | ')}</div>
-              )}
-              {ro.repairLines[0].extractedData.measurements.length > 0 && (
-                <div>
-                  Meas:{' '}
-                  {ro.repairLines[0].extractedData.measurements
-                    .slice(0, 1)
-                    .map((m) => `${m.label}=${m.value}`)
-                    .join('; ')}
-                </div>
-              )}
-            </div>
-          )}
+        <ExtractedDataPreview data={ro.repairLines[0]?.extractedData} />
       </div>
 
       <div className="flex items-center justify-between mb-3 px-1">

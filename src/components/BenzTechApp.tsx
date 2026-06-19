@@ -153,6 +153,7 @@ export function BenzTechApp() {
           onRemoveComplaint={ro.removeComplaint}
           onDecodeVin={ro.decodeVinForRO}
           onAddROXentryPhotos={ro.addROXentryPhotos}
+          onDeleteROXentryImage={(imageId) => void ro.deleteROXentryImage(imageId)}
           onAddRepairLine={ro.addRepairLine}
           onOpenLine={ro.navigateToLine}
           onDeleteRO={() => ro.deleteRO(ro.currentRO!.id)}
@@ -174,6 +175,7 @@ export function BenzTechApp() {
           onBack={() => ro.setView('ro')}
           onUpdateLine={(updates) => ro.updateLine(ro.currentLine!.id, updates)}
           onAddXentryPhotos={() => ro.addXentryPhotos(ro.currentLine!.id)}
+          onDeleteXentryImage={(imageId) => void ro.deleteLineXentryImage(ro.currentLine!.id, imageId)}
           onApplySmartDefaults={() => ro.applySmartDefaultsToLine(ro.currentLine!.id)}
           onGenerateStory={() => ro.generateStory(ro.currentLine!.id)}
           onReviewStory={() => ro.reviewStory(ro.currentLine!.id)}

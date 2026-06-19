@@ -1,5 +1,13 @@
+export interface FaultCode {
+  code: string;
+  description: string;
+  status?: string;
+}
+
 export interface ExtractedData {
+  /** @deprecated Prefer faultCodes — kept in sync for backward compatibility */
   codes: string[];
+  faultCodes: FaultCode[];
   guidedTests: string[];
   measurements: Array<{ label: string; value: string }>;
   components: string[];

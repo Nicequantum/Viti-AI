@@ -139,6 +139,7 @@ export function dbToRepairLine(line: DbLine): RepairLine {
     xentryOcrTexts: parseJson<string[]>(line.xentryOcrTexts, []),
     extractedData: parseJson<ExtractedData>(line.extractedData, {
       codes: [],
+      faultCodes: [],
       guidedTests: [],
       measurements: [],
       components: [],

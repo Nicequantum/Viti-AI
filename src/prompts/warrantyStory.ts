@@ -1,4 +1,5 @@
 import type { RepairLine, RepairOrder } from '../types';
+import { formatExtractedDataForPrompt } from '@/utils/diagnosticParser';
 import { MI_AUDIT_GUIDELINES, MI_GENERATION_STYLE_RULES } from './miAuditGuidelines';
 
 export const WARRANTY_STORY_TEMPERATURE = 0.25;
@@ -68,16 +69,9 @@ export function buildWarrantyStoryUserMessage(
 
   const allRepairs = ro.repairLines.map((l) => `Line ${l.lineNumber}: ${l.description}`).join('\n');
 
-  const data = line.extractedData || { codes: [], guidedTests: [], measurements: [], components: [], circuits: [] };
-  const xentryText = [
-    data.codes.length ? `Codes: ${data.codes.join(', ')}` : '',
-    data.guidedTests.length ? `Guided Tests: ${data.guidedTests.join(' | ')}` : '',
-    data.measurements.length ? `Measurements: ${data.measurements.map((m) => `${m.label} = ${m.value}`).join('; ')}` : '',
-    data.components.length ? `Components: ${data.components.join(' | ')}` : '',
-    data.circuits.length ? `Circuits/Pins: ${data.circuits.join(', ')}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n') || 'No structured Xentry data extracted.';
+  const xentryText = formatExtractedDataForPrompt(
+    line.extractedData || { codes: [], faultCodes: [], guidedTests: [], measurements: [], components: [], circuits: [] }
+  );
 
   const rawXentryOcr =
     line.xentryOcrTexts && line.xentryOcrTexts.length > 0

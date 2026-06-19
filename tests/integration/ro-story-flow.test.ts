@@ -125,6 +125,7 @@ describe('RO → story generation integration', () => {
           xentryImages: [],
           extractedData: {
             codes: ['P0300'],
+            faultCodes: [{ code: 'P0300', description: 'Random/multiple cylinder misfire detected' }],
             guidedTests: [],
             measurements: [],
             components: [],

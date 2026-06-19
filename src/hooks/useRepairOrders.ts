@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { preprocessImageForOCR, runMultiPassOCR, runOCR } from '@/services/ocr';
+import { runDiagnosticOCR, runMultiPassOCR } from '@/services/ocr';
 import type {
   AppView,
   ExtractedData,
@@ -14,7 +14,14 @@ import type {
   StoryQualityResult,
   StoryReviewResult,
 } from '@/types';
-import { emptyExtractedData, mergeExtracted, parseDiagnosticText } from '@/utils/diagnosticParser';
+import {
+  emptyExtractedData,
+  formatExtractionAsOcrText,
+  mergeExtracted,
+  normalizeExtractedData,
+  parseDiagnosticExtraction,
+  rebuildExtractedFromOcrTexts,
+} from '@/utils/diagnosticParser';
 import { getSuggestions } from '@/utils/mercedesKb';
 import { debounce } from '@/lib/debounce';
 import {
@@ -85,11 +92,21 @@ export function useRepairOrders({
     roRef.current = currentRO;
   }, [currentRO]);
 
+  const normalizeRepairOrder = useCallback((repairOrder: RepairOrder): RepairOrder => {
+    return {
+      ...repairOrder,
+      repairLines: repairOrder.repairLines.map((line) => ({
+        ...line,
+        extractedData: normalizeExtractedData(line.extractedData),
+      })),
+    };
+  }, []);
+
   const refreshList = useCallback(async () => {
     const { repairOrders } = await api.listRepairOrders();
-    setAllROs(repairOrders);
+    setAllROs(repairOrders.map(normalizeRepairOrder));
     setLoading(false);
-  }, []);
+  }, [normalizeRepairOrder]);
 
   useEffect(() => {
     refreshList().catch(() => setLoading(false));
@@ -728,34 +745,136 @@ export function useRepairOrders({
     [updateLine]
   );
 
+  const analyzeXentryImage = useCallback(
+    async (file: File, attachment: ImageAttachment, onProgress: (p: number) => void) => {
+      let extracted: Partial<ExtractedData> = {};
+      let text = '';
+
+      onProgress(10);
+      try {
+        const grokData = await api.extractDiagnostics(attachment.pathname);
+        extracted = mergeExtracted(emptyExtractedData(), grokData);
+        text = formatExtractionAsOcrText(grokData);
+        onProgress(50);
+      } catch (err) {
+        console.warn('Grok diagnostic extraction failed, falling back to OCR', err);
+      }
+
+      try {
+        const ocrText = await runDiagnosticOCR(file, (p) => onProgress(text ? 50 + Math.round(p * 0.45) : Math.round(p * 0.9)));
+        if (ocrText.trim()) {
+          const ocrExtracted = parseDiagnosticExtraction(ocrText);
+          extracted = mergeExtracted(mergeExtracted(emptyExtractedData(), extracted), ocrExtracted);
+          text = text ? `${text}\n\n[OCR SUPPLEMENT]\n${ocrText}` : ocrText;
+        }
+      } catch (err) {
+        console.warn('Diagnostic OCR failed for one image', err);
+      }
+
+      if (!text.trim()) {
+        text = '[No diagnostic text extracted from image]';
+      }
+
+      return { text, extracted };
+    },
+    []
+  );
+
   const processXentryImages = useCallback(
     async (files: File[], existingImages: ImageAttachment[], existingOcr: string[], existingExtracted: ExtractedData) => {
-      let updatedExtracted = existingExtracted;
+      let updatedExtracted = normalizeExtractedData(existingExtracted);
       let updatedOcrTexts = existingOcr;
       const newImgs: ImageAttachment[] = [];
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        setOcrProgress(Math.round((i / files.length) * 25));
+        setOcrProgress(Math.round((i / files.length) * 20));
         const attachment = await uploadFileAsAttachment(file, 'ximg');
         newImgs.push(attachment);
         try {
-          setOcrProgress(Math.round(25 + (i / files.length) * 20));
-          const pre = await preprocessImageForOCR(file, 'fast');
-          const text = await runOCR(pre, (p) =>
-            setOcrProgress(Math.round(45 + ((i + p / 100) / files.length) * 55))
+          const result = await analyzeXentryImage(file, attachment, (p) =>
+            setOcrProgress(Math.round(20 + ((i + p / 100) / files.length) * 80))
           );
-          const diag = parseDiagnosticText(text);
-          updatedExtracted = mergeExtracted(updatedExtracted, diag);
-          updatedOcrTexts = [...updatedOcrTexts, text];
+          updatedExtracted = mergeExtracted(updatedExtracted, result.extracted);
+          updatedOcrTexts = [...updatedOcrTexts, result.text];
         } catch (err) {
-          console.warn('Xentry OCR failed for one image', err);
+          console.warn('Xentry analysis failed for one image', err);
+          updatedOcrTexts = [...updatedOcrTexts, '[Analysis failed for this image]'];
         }
       }
 
       return { newImgs, updatedExtracted, updatedOcrTexts, allImages: [...existingImages, ...newImgs] };
     },
-    [setOcrProgress]
+    [analyzeXentryImage, setOcrProgress]
+  );
+
+  const removeImageAtIndex = useCallback((images: ImageAttachment[], ocrTexts: string[], imageId: string) => {
+    const index = images.findIndex((img) => img.id === imageId);
+    if (index < 0) return null;
+    const nextImages = images.filter((img) => img.id !== imageId);
+    const nextOcr = ocrTexts.filter((_, i) => i !== index);
+    return { nextImages, nextOcr, rebuilt: rebuildExtractedFromOcrTexts(nextOcr) };
+  }, []);
+
+  const deleteLineXentryImage = useCallback(
+    async (lineId: string, imageId: string) => {
+      if (!window.confirm('Delete this diagnostic photo? Extracted data will be updated.')) return;
+      const latestRO = roRef.current;
+      if (!latestRO) return;
+      const line = latestRO.repairLines.find((l) => l.id === lineId);
+      if (!line) return;
+
+      const result = removeImageAtIndex(line.xentryImages || [], line.xentryOcrTexts || [], imageId);
+      if (!result) return;
+
+      const updatedLines = latestRO.repairLines.map((l) =>
+        l.id === lineId
+          ? {
+              ...l,
+              xentryImages: result.nextImages,
+              xentryOcrTexts: result.nextOcr,
+              extractedData: result.rebuilt,
+            }
+          : l
+      );
+      await saveROImmediate({ ...latestRO, repairLines: updatedLines });
+      toast.success('Diagnostic photo deleted');
+    },
+    [removeImageAtIndex, saveROImmediate]
+  );
+
+  const deleteROXentryImage = useCallback(
+    async (imageId: string) => {
+      if (!window.confirm('Delete this Xentry photo? Extracted data will be updated.')) return;
+      const latestRO = roRef.current;
+      if (!latestRO) return;
+
+      const result = removeImageAtIndex(latestRO.xentryImages || [], latestRO.xentryOcrTexts || [], imageId);
+      if (!result) return;
+
+      const firstLine = latestRO.repairLines[0];
+      const updatedLines = firstLine
+        ? latestRO.repairLines.map((l, idx) =>
+            idx === 0
+              ? {
+                  ...l,
+                  xentryImages: result.nextImages,
+                  xentryOcrTexts: result.nextOcr,
+                  extractedData: result.rebuilt,
+                }
+              : l
+          )
+        : latestRO.repairLines;
+
+      await saveROImmediate({
+        ...latestRO,
+        xentryImages: result.nextImages,
+        xentryOcrTexts: result.nextOcr,
+        repairLines: updatedLines,
+      });
+      toast.success('Xentry photo deleted');
+    },
+    [removeImageAtIndex, saveROImmediate]
   );
 
   const addXentryPhotos = useCallback(
@@ -1125,6 +1244,8 @@ export function useRepairOrders({
     applySmartDefaultsToLine,
     addXentryPhotos,
     addROXentryPhotos,
+    deleteLineXentryImage,
+    deleteROXentryImage,
     generateStory,
     reviewStory,
     acknowledgeStoryBaseline,

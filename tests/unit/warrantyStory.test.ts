@@ -33,6 +33,7 @@ const baseLine: RepairLine = {
   xentryImages: [],
   extractedData: {
     codes: ['P0300'],
+    faultCodes: [{ code: 'P0300', description: 'Random/multiple cylinder misfire detected' }],
     guidedTests: ['Cylinder 3 misfire count elevated'],
     measurements: [{ label: 'Source voltage', value: '12.4V' }],
     components: [],

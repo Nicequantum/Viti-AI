@@ -1,4 +1,5 @@
 import type { RepairLine, RepairOrder } from '@/types';
+import { formatExtractedDataForPrompt } from '@/utils/diagnosticParser';
 import { MI_AUDIT_GUIDELINES } from './miAuditGuidelines';
 import { WARRANTY_WORKFLOW_STEPS } from './warrantyStory';
 
@@ -113,14 +114,9 @@ Respond with ONLY valid JSON matching this schema (no markdown, no commentary):
 ${REVIEW_JSON_SCHEMA}`;
 
 function buildLineContext(ro: RepairOrder, line: RepairLine): string {
-  const data = line.extractedData || { codes: [], guidedTests: [], measurements: [], components: [], circuits: [] };
-  const xentryText = [
-    data.codes.length ? `Codes: ${data.codes.join(', ')}` : '',
-    data.guidedTests.length ? `Guided Tests: ${data.guidedTests.join(' | ')}` : '',
-    data.measurements.length ? `Measurements: ${data.measurements.map((m) => `${m.label} = ${m.value}`).join('; ')}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
+  const xentryText = formatExtractedDataForPrompt(
+    line.extractedData || { codes: [], faultCodes: [], guidedTests: [], measurements: [], components: [], circuits: [] }
+  );
 
   const workflowList = WARRANTY_WORKFLOW_STEPS.map((s, i) => `${i + 1}. ${s}`).join('\n');
 

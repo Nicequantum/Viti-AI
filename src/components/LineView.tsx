@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, BookOpen, BookmarkPlus, Camera, Copy, Download, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
+import { ExtractedDataPreview } from '@/components/ExtractedDataPreview';
 import { StableInput } from '@/components/StableInput';
 import { StableTextarea } from '@/components/StableTextarea';
+import { XentryImageGallery } from '@/components/XentryImageGallery';
 import { SaveTemplateModal } from '@/components/SaveTemplateModal';
 import {
   StoryQualityLoadingPanel,
@@ -31,6 +33,7 @@ interface LineViewProps {
   onBack: () => void;
   onUpdateLine: (updates: Partial<RepairLine>) => void;
   onAddXentryPhotos: () => void;
+  onDeleteXentryImage: (imageId: string) => void;
   onApplySmartDefaults: () => void;
   onGenerateStory: () => void;
   onReviewStory: () => void;
@@ -61,6 +64,7 @@ export function LineView({
   onBack,
   onUpdateLine,
   onAddXentryPhotos,
+  onDeleteXentryImage,
   onApplySmartDefaults,
   onGenerateStory,
   onReviewStory,
@@ -186,36 +190,14 @@ export function LineView({
             {isProcessingOCR ? <Loader2 size={18} className="animate-spin" /> : <Camera size={18} />}
             {isProcessingOCR ? `ANALYZING PHOTOS... ${ocrProgress}%` : 'ADD XENTRY TESTS / FAULT CODES / GUIDED / WIRING / CONTINUITY'}
           </button>
-          <p className="text-[10px] text-[#8e8e93] -mt-1 mb-2">Photos analyzed with OCR. Only extracted data is used in warranty stories.</p>
+          <p className="text-[10px] text-[#8e8e93] -mt-1 mb-2">
+            Photos analyzed with Grok vision plus on-device OCR. Tap a photo to view or delete.
+          </p>
 
           {line.xentryImages && line.xentryImages.length > 0 && (
-            <div className="grid grid-cols-4 gap-2 mb-2">
-              {line.xentryImages.map((img, idx) => (
-                <img
-                  key={idx}
-                  src={img.url}
-                  className="w-full h-16 object-cover rounded border border-[#38383a]"
-                  alt={img.name}
-                  onClick={() => window.open(img.url)}
-                />
-              ))}
-            </div>
+            <XentryImageGallery images={line.xentryImages} onDeleteImage={onDeleteXentryImage} />
           )}
-          {line.extractedData &&
-            (line.extractedData.codes.length || line.extractedData.guidedTests.length || line.extractedData.measurements.length) > 0 && (
-              <div className="text-[10px] bg-[#1c1c1e] p-2 rounded mb-2">
-                <div className="font-semibold mb-1">Extracted from photos:</div>
-                {line.extractedData.codes.length > 0 && <div>Codes: {line.extractedData.codes.join(', ')}</div>}
-                {line.extractedData.guidedTests.length > 0 && (
-                  <div>Guided: {line.extractedData.guidedTests.slice(0, 2).join(' | ')}</div>
-                )}
-                {line.extractedData.measurements.length > 0 && (
-                  <div>
-                    Meas: {line.extractedData.measurements[0].label}={line.extractedData.measurements[0].value}
-                  </div>
-                )}
-              </div>
-            )}
+          <ExtractedDataPreview data={line.extractedData} />
         </div>
 
         <div className="ios-card p-3 mb-1">

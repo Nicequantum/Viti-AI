@@ -1,3 +1,4 @@
+import { DIAGNOSTIC_EXTRACTION_PROMPT } from '@/prompts/diagnosticExtraction';
 import { RO_EXTRACTION_PROMPT } from '@/prompts/roExtraction';
 import {
   STORY_REVIEW_SYSTEM_PROMPT,
@@ -14,7 +15,8 @@ import {
   WARRANTY_STORY_TEMPERATURE,
   buildWarrantyStoryUserMessage,
 } from '@/prompts/warrantyStory';
-import type { RepairLine, RepairOrder } from '@/types';
+import type { ExtractedData, RepairLine, RepairOrder } from '@/types';
+import { normalizeExtractedData, parseDiagnosticExtractionJson } from '@/utils/diagnosticParser';
 import { parseStructuredROText } from '@/utils/roExtractor';
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
@@ -118,6 +120,27 @@ export async function reviewWarrantyStory(
     { temperature: 0.15, max_tokens: 1400, timeoutMs: 90_000 }
   );
   return parseStoryReviewResponse(raw);
+}
+
+export async function extractDiagnosticsFromImage(imageDataUrl: string): Promise<ExtractedData> {
+  const raw = await grokChat(
+    [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: DIAGNOSTIC_EXTRACTION_PROMPT },
+          { type: 'image_url', image_url: { url: imageDataUrl } },
+        ],
+      },
+    ],
+    { temperature: 0.05, max_tokens: 900, timeoutMs: 90_000 }
+  );
+
+  const parsed = parseDiagnosticExtractionJson(raw);
+  if (!parsed) {
+    throw new Error('Could not parse diagnostic extraction from Grok response');
+  }
+  return normalizeExtractedData(parsed);
 }
 
 export async function extractROFromImages(imageDataUrls: string[]) {

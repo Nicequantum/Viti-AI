@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { sanitizeIdentifier, sanitizeText, sanitizeVin } from '../../src/lib/sanitize';
+import {
+  sanitizeComplaintSlots,
+  sanitizeIdentifier,
+  sanitizeText,
+  sanitizeTextArray,
+  sanitizeVin,
+} from '../../src/lib/sanitize';
 
 describe('sanitize', () => {
   test('removes HTML tags and script handlers', () => {
@@ -23,5 +29,13 @@ describe('sanitize', () => {
   test('sanitizes identifiers', () => {
     assert.equal(sanitizeIdentifier('RO-<script>123'), 'RO-123');
     assert.ok(!sanitizeIdentifier('RO-<script>123').includes('<'));
+  });
+
+  test('sanitizeComplaintSlots preserves empty in-progress complaint slots', () => {
+    assert.deepEqual(sanitizeComplaintSlots(['Engine light', '', '  ']), ['Engine light', '', '']);
+  });
+
+  test('sanitizeTextArray still drops empty values for generic lists', () => {
+    assert.deepEqual(sanitizeTextArray(['keep', '', '  ']), ['keep']);
   });
 });

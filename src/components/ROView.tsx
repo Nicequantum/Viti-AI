@@ -196,6 +196,7 @@ export function ROView({
                     fieldKey={stableId}
                     value={c}
                     onChange={(v) => onEditComplaint(idx, v)}
+                    placeholder="Describe customer concern or symptom..."
                     className="bg-[#2c2c2e] border border-[#38383a] rounded-2xl px-3 py-2 text-sm min-h-[48px] resize-y"
                   />
                   <button onClick={() => onRemoveComplaint(idx)} className="mt-1 p-1.5 text-[#ff9f0a]" title="Remove complaint">

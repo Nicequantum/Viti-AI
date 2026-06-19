@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { sanitizeIdentifier, sanitizeText, sanitizeTextArray, sanitizeVin } from './sanitize';
+import {
+  sanitizeComplaintSlots,
+  sanitizeIdentifier,
+  sanitizeText,
+  sanitizeTextArray,
+  sanitizeVin,
+} from './sanitize';
 
 const safeText = (max: number) => z.string().max(max).transform(sanitizeText);
 const safeTextOptional = (max: number) => z.string().max(max).transform(sanitizeText).optional();
@@ -87,7 +93,7 @@ export const createRepairOrderSchema = z.object({
   customerName: safeTextOptional(200),
   serviceAdvisorName: safeTextOptional(48),
   advisorExtractionSource: advisorExtractionSourceSchema.optional(),
-  complaints: z.array(safeText(2000)).max(20).transform(sanitizeTextArray).optional(),
+  complaints: z.array(safeText(2000)).max(20).transform(sanitizeComplaintSlots).optional(),
   complaintLabels: z.array(safeText(4)).max(20).optional(),
   xentryImages: z.array(imageAttachmentSchema).max(20).optional(),
   xentryOcrTexts: z.array(safeText(50000)).max(20).optional(),
@@ -101,7 +107,7 @@ export const updateRepairOrderSchema = z.object({
   serviceAdvisorName: safeTextOptional(48),
   advisorExtractionSource: advisorExtractionSourceSchema.optional(),
   complaintsWereCorrected: z.boolean().optional(),
-  complaints: z.array(safeText(2000)).max(20).transform(sanitizeTextArray).optional(),
+  complaints: z.array(safeText(2000)).max(20).transform(sanitizeComplaintSlots).optional(),
   complaintLabels: z.array(safeText(4)).max(20).optional(),
   xentryImages: z.array(imageAttachmentSchema).max(20).optional(),
   xentryOcrTexts: z.array(safeText(50000)).max(20).optional(),

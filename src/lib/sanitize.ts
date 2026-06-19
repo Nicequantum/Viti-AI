@@ -18,6 +18,11 @@ export function sanitizeTextArray(values: string[]): string[] {
   return values.map(sanitizeText).filter((item) => item.length > 0);
 }
 
+/** Preserve empty complaint slots so in-progress edits are not dropped on save. */
+export function sanitizeComplaintSlots(values: string[]): string[] {
+  return values.map(sanitizeText);
+}
+
 /** VIN: uppercase alphanumeric only (no I/O/Q per standard, but we allow decoder to validate). */
 export function sanitizeVin(value: string): string {
   return value.replace(/[^A-HJ-NPR-Za-hj-npr-z0-9]/g, '').toUpperCase().slice(0, 17);

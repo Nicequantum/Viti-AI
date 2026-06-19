@@ -146,7 +146,12 @@ export function useRepairOrders({
     async (ro: RepairOrder | null) => {
       if (ro) {
         try {
-          const saved = ensureComplaintIds(await persistRO(ro));
+          const persisted = await persistRO(ro);
+          const saved = ensureComplaintIds(
+            ro.complaintIds && ro.complaintIds.length === persisted.complaints.length
+              ? { ...persisted, complaintIds: ro.complaintIds }
+              : persisted
+          );
           roRef.current = saved;
           setCurrentRO(saved);
           setAllROs((prev) => {
@@ -583,9 +588,14 @@ export function useRepairOrders({
     try {
       const draft = createManualRepairOrder();
       const { repairOrder } = await api.createRepairOrder(draft);
-      roRef.current = ensureComplaintIds(repairOrder);
-      setAllROs((prev) => [repairOrder, ...prev]);
-      setCurrentRO(repairOrder);
+      const withIds = ensureComplaintIds(
+        draft.complaintIds && draft.complaintIds.length === repairOrder.complaints.length
+          ? { ...repairOrder, complaintIds: draft.complaintIds }
+          : repairOrder
+      );
+      roRef.current = withIds;
+      setAllROs((prev) => [withIds, ...prev]);
+      setCurrentRO(withIds);
       navigateView('ro');
       toast.success('Manual repair order created');
     } catch (e) {
@@ -650,7 +660,7 @@ export function useRepairOrders({
   const addComplaint = useCallback(() => {
     const ro = roRef.current;
     if (!ro) return;
-    const complaints = [...(ro.complaints || []), 'New concern - describe symptom'];
+    const complaints = [...(ro.complaints || []), ''];
     const labels = [...(ro.complaintLabels || ro.complaints.map((_, i) => String.fromCharCode(65 + i)))];
     const ids = [...(ro.complaintIds || labels.map((l) => `cmp-${ro.id}-${l}`))];
     const nextLabel = nextComplaintLabel(labels, complaints.length - 1);
@@ -674,13 +684,53 @@ export function useRepairOrders({
 
   const editComplaint = useCallback(
     (index: number, value: string) => {
-      const ro = roRef.current;
-      if (!ro) return;
-      const updated = [...(ro.complaints || [])];
-      updated[index] = value;
-      updateComplaints(updated, ro.complaintLabels, ro.complaintIds);
+      applyROUpdate((ro) => {
+        const updated = [...(ro.complaints || [])];
+        updated[index] = value;
+        const labels = ro.complaintLabels;
+        const label = labels?.[index] || String.fromCharCode(65 + index);
+        const concern = value || '';
+        const prefix = `${label}. `;
+        const autoDescription = concern
+          ? `${prefix}${concern}`.slice(0, 72)
+          : `${label}. (not extracted — tap to edit)`;
+
+        let repairLines = ro.repairLines;
+        if (repairLines.length >= updated.length) {
+          repairLines = repairLines.map((line, lineIndex) => {
+            if (lineIndex !== index) return line;
+            const concernChanged = line.customerConcern !== concern;
+            const descLooksAuto =
+              !line.description ||
+              line.description === 'Enter repair description' ||
+              line.description === 'New repair item' ||
+              line.description.startsWith(`${label}. `) ||
+              line.description === line.customerConcern?.slice(0, 60) ||
+              line.description === line.customerConcern?.slice(0, 72);
+            return {
+              ...line,
+              lineNumber: index + 1,
+              customerConcern: concern,
+              description: concernChanged || descLooksAuto ? autoDescription : line.description,
+            };
+          });
+          if (repairLines.length > updated.length) {
+            repairLines = repairLines.slice(0, updated.length);
+          }
+        } else {
+          repairLines = syncRepairLinesWithComplaints(repairLines, updated, labels);
+        }
+
+        return {
+          ...ro,
+          complaints: updated,
+          complaintLabels: labels,
+          complaintIds: ro.complaintIds,
+          repairLines,
+        };
+      });
     },
-    [updateComplaints]
+    [applyROUpdate]
   );
 
   const updateRONumber = useCallback(

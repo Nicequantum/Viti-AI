@@ -105,7 +105,7 @@ export function createManualRepairOrder(): RepairOrder {
     roNumber: `R-${Date.now().toString().slice(-6)}`,
     vehicle: { vin: '', year: '', make: '', model: '', engine: '', mileageIn: '', mileageOut: '' },
     customer: { name: '' },
-    complaints: ['Enter customer concern / symptom here (will label as A.)'],
+    complaints: [''],
     complaintLabels: ['A'],
     complaintIds: [`cmp-${roId}-A`],
     xentryImages: [],

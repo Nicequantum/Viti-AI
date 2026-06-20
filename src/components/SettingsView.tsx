@@ -22,7 +22,7 @@ export function SettingsView({ session, onBack, onLogout, onOpenAuditLogs, onOpe
   const [usersLoading, setUsersLoading] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [newUser, setNewUser] = useState({ email: '', name: '', password: '', role: 'technician' as 'technician' | 'manager' });
+  const [newUser, setNewUser] = useState({ d7Number: '', name: '', password: '', role: 'technician' as 'technician' | 'manager' });
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
@@ -84,7 +84,7 @@ export function SettingsView({ session, onBack, onLogout, onOpenAuditLogs, onOpe
     try {
       await api.createUser(newUser);
       toast.success('Technician account created');
-      setNewUser({ email: '', name: '', password: '', role: 'technician' });
+      setNewUser({ d7Number: '', name: '', password: '', role: 'technician' });
       setShowCreateForm(false);
       await loadUsers();
     } catch (err) {
@@ -134,7 +134,7 @@ export function SettingsView({ session, onBack, onLogout, onOpenAuditLogs, onOpe
           </div>
           <div>
             <div className="font-semibold">{session.name}</div>
-            <div className="text-xs text-[#8e8e93]">{session.email}</div>
+            <div className="text-xs text-[#8e8e93] font-mono tracking-wide">{session.d7Number}</div>
             <div className="text-[10px] text-[#666] capitalize">{session.role}</div>
           </div>
         </div>
@@ -265,11 +265,14 @@ export function SettingsView({ session, onBack, onLogout, onOpenAuditLogs, onOpe
                 required
               />
               <input
-                type="email"
-                placeholder="Email"
-                value={newUser.email}
-                onChange={(e) => setNewUser((u) => ({ ...u, email: e.target.value }))}
-                className="w-full bg-[#1c1c1e] rounded px-3 py-2 text-sm"
+                type="text"
+                placeholder="D7 number (e.g. D7HARRIH)"
+                value={newUser.d7Number}
+                onChange={(e) => setNewUser((u) => ({ ...u, d7Number: e.target.value.toUpperCase() }))}
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                className="w-full bg-[#1c1c1e] rounded px-3 py-2 text-sm font-mono tracking-wide uppercase"
                 required
               />
               <input
@@ -307,7 +310,7 @@ export function SettingsView({ session, onBack, onLogout, onOpenAuditLogs, onOpe
                     <div>
                       <div className="text-sm font-medium">{user.name}</div>
                       <div className="text-[10px] text-[#8e8e93]">
-                        {user.email} · {user.role}
+                        {user.d7Number} · {user.role}
                         {!user.isActive && <span className="text-[#ff3b30] ml-1">(deactivated)</span>}
                       </div>
                     </div>
